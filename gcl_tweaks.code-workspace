@@ -1,0 +1,30 @@
+{
+	"folders": [
+		{
+			"path": ".",
+			"name": "GCL Tweaks"
+		},
+		{
+			"path": "/home/garylucas/.avorion",
+			"name": "Avorion User Data"
+		},
+		{
+			"path": "/home/garylucas/.steam/steam/steamapps/common/Avorion",
+			"name": "Avorion Game Data"
+		}
+	],
+	"settings": {
+		"files.exclude": {
+			"mods": true,
+			"galaxies": true,
+			"backups": true,
+			"**/.git": true,
+			"**/.DS_Store": true
+		},
+		"search.exclude": {
+			"mods": true,
+			"galaxies": true,
+			"backups": true
+		}
+	}
+}

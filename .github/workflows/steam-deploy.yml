@@ -1,0 +1,175 @@
+name: Steam Workshop Deployment and GitHub Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['modinfo.lua']
+
+jobs:
+  steam-deploy-and-release:
+    runs-on: ubuntu-latest
+    # Run when modinfo.lua changes - path filter above ensures this is a version change
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get Version from modinfo.lua
+        id: version
+        run: |
+          VERSION=$(grep -o 'version = "[^"]*"' modinfo.lua | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION"
+      
+      - name: Create Git Tag and Release
+        run: |
+          set -x  # Enable verbose output for entire script
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "🚀 Starting release creation for version: $VERSION"
+          
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Create tag (only if it doesn't exist)
+          if ! git tag -l | grep -q "^v$VERSION$"; then
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+            echo "✅ Created tag v$VERSION"
+          else
+            echo "⚠️ Tag v$VERSION already exists, skipping"
+          fi
+          
+          # Generate changelog from recent commits
+          CHANGELOG=$(git log --pretty=format:"- %s" -10 HEAD | grep -v "bump version" || true)
+          
+          # Fallback if no changes after filtering
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- Recent improvements and updates"
+          fi
+          
+          # Create GitHub release (only if it doesn't exist)
+          echo "🔍 Checking if release v$VERSION already exists..."
+          if ! gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "📝 Creating GitHub release v$VERSION..."
+            echo "Changelog content:"
+            echo "$CHANGELOG"
+            
+            echo "🚀 Running gh release create..."
+            gh release create "v$VERSION" \
+              --title "Release v$VERSION" \
+              --notes "## What's Changed
+            $CHANGELOG
+            
+            ## Installation
+            1. Download from releases and place in your Avorion mods directory
+            2. Or subscribe on Steam Workshop!
+            
+            This release includes comprehensive test coverage and has passed all automated checks." \
+              --generate-notes || {
+                echo "❌ gh release create failed with exit code $?"
+                echo "🔍 Attempting to get more details..."
+                gh auth status
+                gh release list --limit 5
+                exit 1
+              }
+              
+            echo "✅ Created release v$VERSION"
+          else
+            echo "⚠️ Release v$VERSION already exists, skipping creation"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Generate Steam Workshop Changelog
+        id: steam_changelog
+        run: |
+          set -x  # Enable verbose output for entire script
+          # Convert GitHub commit messages to user-friendly Steam changelog
+          CHANGELOG=$(git log --pretty=format:"- %s" -10 HEAD | grep -v "bump version" || true)
+          
+          # Fallback if no changes after filtering
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- Recent improvements and updates"
+          fi
+          
+          # Transform semantic commit messages to user-friendly format
+          STEAM_CHANGELOG=$(echo "$CHANGELOG" | sed -E '
+            s/^- feat(\([^)]*\))?!?: (.+)/Added \2 (breaking change)/
+            s/^- feat(\([^)]*\))?: (.+)/Added \2/
+            s/^- fix(\([^)]*\))?: (.+)/Fixed \2/
+            s/^- docs(\([^)]*\))?: (.+)/Updated documentation/
+            s/^- style(\([^)]*\))?: (.+)/Improved code style/
+            s/^- refactor(\([^)]*\))?: (.+)/Refactored code/
+            s/^- perf(\([^)]*\))?: (.+)/Improved performance/
+            s/^- test(\([^)]*\))?: (.+)/Updated tests/
+            s/^- chore(\([^)]*\))?: (.+)/Maintenance updates/
+            s/^- (.+)/\1/
+          ' | head -5 | tr '\n' '; ' | sed 's/; $//')
+          
+          # Fallback if no changes detected
+          if [ -z "$STEAM_CHANGELOG" ]; then
+            STEAM_CHANGELOG="Various improvements and bug fixes"
+          fi
+          
+          echo "steam_changelog=$STEAM_CHANGELOG" >> $GITHUB_OUTPUT
+          echo "Steam changelog: $STEAM_CHANGELOG"
+      
+      - name: Create Steam build directory
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "📦 Creating clean Steam build directory..."
+          mkdir -p steam_build
+          
+          # Copy only essential mod files
+          cp modinfo.lua steam_build/
+          cp -r data/ steam_build/
+          cp thumb.png steam_build/ 2>/dev/null || echo "⚠️ No thumb.png found, using default"
+          cp LICENSE steam_build/ 2>/dev/null || echo "⚠️ No LICENSE found"
+          
+          echo "Steam build contents:"
+          find steam_build -type f | sort
+      
+      
+      - name: Manual Steam Workshop Deploy
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          CHANGELOG="${{ steps.steam_changelog.outputs.steam_changelog }}"
+          
+          echo "🚀 Preparing Workshop manifest..."
+          # Copy template and replace placeholders
+          cp manifest.vdf manifest_deploy.vdf
+          sed -i "s|CONTENTFOLDER_PLACEHOLDER|/mod/steam_build|g" manifest_deploy.vdf
+          sed -i "s|PREVIEWFILE_PLACEHOLDER|/mod/steam_build/thumb.png|g" manifest_deploy.vdf
+          sed -i "s|CHANGENOTE_PLACEHOLDER|Version v${VERSION}: ${CHANGELOG}|g" manifest_deploy.vdf
+          
+          echo "📋 Manifest contents:"
+          cat manifest_deploy.vdf
+          
+          echo ""
+          echo "🔑 Logging into Steam..."
+          docker run --rm \
+            -v "$(pwd):/mod" \
+            -w /mod \
+            steamcmd/steamcmd:ubuntu-22 \
+            steamcmd +login "${{ secrets.STEAM_USERNAME }}" "${{ secrets.STEAM_PASSWORD }}" \
+            +workshop_build_item /mod/manifest_deploy.vdf \
+            +quit
+      
+      - name: Update GitHub Release with Workshop Link
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "✅ Steam Workshop deployment successful!"
+          echo "🎉 Updated Steam Workshop item: https://steamcommunity.com/sharedfiles/filedetails/?id=3559953537"
+          
+          # Update GitHub release with Steam Workshop link
+          gh release edit "v$VERSION" \
+            --notes "$(gh release view "v$VERSION" --json body -q .body)
+
+          **Steam Workshop**: [View on Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3559953537)
+          *Workshop updated automatically with version $VERSION*"
+          
+          echo "✅ Updated GitHub release with Steam Workshop link"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

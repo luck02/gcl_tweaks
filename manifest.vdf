@@ -1,0 +1,11 @@
+"workshopitem"
+{
+    "appid" "445220"
+    "publishedfileid" "3559953537"
+    "contentfolder" "CONTENTFOLDER_PLACEHOLDER"
+    "previewfile" "PREVIEWFILE_PLACEHOLDER"
+    "visibility" "0"
+    "title" "GCL Tweaks"
+    "description" "GCL Tweaks provides utility commands for debugging and modifying game state.\n\nCommands:\n/gcl_tweak showdroptables - Print system upgrade drop weights to chat\n/gcl_tweak isobjectwrecked - Check if entity has 'wrecked' (boarding) status\n/gcl_tweak setobjectwrecked 0|1 - Set or clear 'wrecked' status on selected entity\n\nSource code available on GitHub."
+    "changenote" "CHANGENOTE_PLACEHOLDER"
+}
