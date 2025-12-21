@@ -78,3 +78,20 @@ _deploy:
 	echo ""; \
 	echo "🎉 Release v$$NEW triggered!"; \
 	echo "   GitHub Actions will create the release and deploy to Steam Workshop."
+
+# Creating the initial Steam Workshop item manually (run this once locally)
+# Requires steamcmd to be installed and available in PATH (or use docker command)
+# This assumes running locally interactively
+deploy-initial:
+	@echo "📦 Creating clean steam_build directory..."
+	rm -rf steam_build
+	mkdir -p steam_build
+	cp modinfo.lua steam_build/
+	cp -r data/ steam_build/
+	cp manifest.vdf manifest_deploy.vdf
+	sed -i "s|CONTENTFOLDER_PLACEHOLDER|$(PWD)/steam_build|g" manifest_deploy.vdf
+	sed -i "s|PREVIEWFILE_PLACEHOLDER|$(PWD)/thumb.png|g" manifest_deploy.vdf
+	sed -i "s|CHANGENOTE_PLACEHOLDER|Initial Upload|g" manifest_deploy.vdf
+	@echo "🚀 Ready to deploy to Steam Workshop."
+	@echo "Run the following command to login and upload:"
+	@echo "steamcmd +login <YOUR_STEAM_USERNAME> +workshop_build_item $(PWD)/manifest_deploy.vdf +quit"
