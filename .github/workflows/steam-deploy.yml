@@ -3,7 +3,7 @@ name: Steam Workshop Deployment and GitHub Release
 on:
   push:
     branches: [main]
-    paths: ['modinfo.lua']
+    paths: ['modinfo.lua', 'manifest.vdf']
 
 jobs:
   steam-deploy-and-release:
