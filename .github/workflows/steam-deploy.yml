@@ -32,13 +32,14 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # Create tag (only if it doesn't exist)
-          if ! git tag -l | grep -q "^v$VERSION$"; then
+          # Check if tag exists on remote
+          if git ls-remote --exit-code --tags origin "v$VERSION" >/dev/null 2>&1; then
+            echo "⚠️ Tag v$VERSION already exists on remote, skipping creation"
+          else
+            echo "📝 Creating tag v$VERSION..."
             git tag "v$VERSION"
             git push origin "v$VERSION"
             echo "✅ Created tag v$VERSION"
-          else
-            echo "⚠️ Tag v$VERSION already exists, skipping"
           fi
           
           # Generate changelog from recent commits
