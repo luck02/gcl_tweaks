@@ -9,20 +9,16 @@ if UpgradeGenerator then
             oldInitialize(self, ...)
         end
 
-        -- GCL Tweaks: Apply persistent multipliers from Galaxy storage
-        -- Only try to load Galaxy settings if Galaxy() is available (server-side)
-        if self.scripts and Galaxy then
-            local galaxy = Galaxy()
-            if galaxy and galaxy.getValue then
-                for scriptPath, data in pairs(self.scripts) do
-                    local basename = scriptPath:match("([^/]+)$")
-                    if basename then
-                        local key = "gcl_drop_mult_" .. basename
-                        local multiplier = galaxy:getValue(key)
+        -- GCL Tweaks: Apply persistent multipliers from Server storage
+        if self.scripts then
+            for scriptPath, data in pairs(self.scripts) do
+                local basename = scriptPath:match("([^/]+)$")
+                if basename then
+                    local key = "gcl_drop_mult_" .. basename
+                    local multiplier = Server():getValue(key)
 
-                        if multiplier then
-                            data.weight = data.weight * multiplier
-                        end
+                    if multiplier then
+                        data.weight = data.weight * multiplier
                     end
                 end
             end

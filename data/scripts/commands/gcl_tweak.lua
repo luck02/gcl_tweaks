@@ -51,6 +51,7 @@ function showDropTables(sender)
     end
 
 
+
     local dropTable = {}
     for script, data in pairs(generator.scripts) do
         table.insert(dropTable, {
@@ -61,8 +62,8 @@ function showDropTables(sender)
         })
     end
 
-    -- Sort by probability (descending)
-    table.sort(dropTable, function(a, b) return a.weight > b.weight end)
+    -- Sort alphabetically by script name
+    table.sort(dropTable, function(a, b) return a.script < b.script end)
 
     -- Calculate total weight for percentage
     local totalWeight = 0
@@ -70,8 +71,8 @@ function showDropTables(sender)
         totalWeight = totalWeight + entry.weight
     end
 
-    -- Build output string
-    local output = "=== System Upgrade Drop Weights (Dynamic) ===\n"
+    -- Build output string and also print to server log
+    local fullOutput = "=== System Upgrade Drop Weights (Dynamic) ===\n"
 
     for _, entry in ipairs(dropTable) do
         local pct = (entry.weight / totalWeight) * 100
@@ -79,14 +80,21 @@ function showDropTables(sender)
         if entry.dist2 then
             distStr = string.format(" (dist <= %d)", math.sqrt(entry.dist2))
         end
-        output = output .. string.format("%.1f%% (%s): %s%s\n", pct, entry.weight, entry.script, distStr)
+        local line = string.format("%.1f%% (%s): %s%s\n", pct, entry.weight, entry.script, distStr)
+        fullOutput = fullOutput .. line
     end
 
-    output = output .. string.format("\nTotal weight: %.2f", totalWeight)
+    fullOutput = fullOutput .. string.format("\nTotal weight: %.2f (%d modules)", totalWeight, #dropTable)
 
+    -- Print full output to server log for reference
+    print("=== GCL TWEAKS DROP TABLES ===")
+    print(fullOutput)
+    print("=== END DROP TABLES ===")
+
+    -- Send to player (full output - shows in client log)
     local player = Player(sender)
     if player then
-        player:sendChatMessage("GCL Tweaks", ChatMessageType.Information, output)
+        player:sendChatMessage("GCL Tweaks", ChatMessageType.Information, fullOutput)
     end
 
     return 0, "", ""
@@ -123,7 +131,7 @@ function setDropRate(sender, component, multiplier)
     end
 
     local key = "gcl_drop_mult_" .. component
-    Galaxy():setValue(key, multValue)
+    Server():setValue(key, multValue)
 
     player:sendChatMessage("GCL Tweaks", ChatMessageType.Information,
         string.format("Set drop multiplier for '%s' to %.2f (Key: %s)", component, multValue, key))
@@ -242,5 +250,12 @@ Examples:
   /gcl_tweak setdroprate civiltcs 0.1
   /gcl_tweak showdroptables
   /gcl_tweak isobjectwrecked
-  /gcl_tweak setobjectwrecked 0]]
+  /gcl_tweak setobjectwrecked 1
+]]
+end
+
+function getPermissions()
+    -- Return empty table to allow any player to use these commands
+    -- If this function didn't exist, commands would be admin-only by default
+    return {}
 end
