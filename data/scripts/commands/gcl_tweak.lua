@@ -8,6 +8,8 @@
 
 package.path = package.path .. ";data/scripts/lib/?.lua"
 
+local UpgradeGenerator = include("upgradegenerator")
+
 -- Command entry point
 function execute(sender, commandName, subcommand, ...)
     local args = { ... }
@@ -18,8 +20,11 @@ function execute(sender, commandName, subcommand, ...)
 
     subcommand = string.lower(subcommand)
 
+
     if subcommand == "showdroptables" then
         return showDropTables(sender)
+    elseif subcommand == "setdroprate" then
+        return setDropRate(sender, args[1], args[2])
     elseif subcommand == "isobjectwrecked" then
         return isObjectWrecked(sender)
     elseif subcommand == "setobjectwrecked" then
@@ -32,6 +37,7 @@ end
 function showHelp()
     local msg = "Usage: /gcl_tweak <subcommand>\n"
     msg = msg .. "  showdroptables - Print system upgrade drop weights to chat\n"
+    msg = msg .. "  setdroprate <component> <multiplier> - Set drop chance multiplier\n"
     msg = msg .. "  isobjectwrecked - Check if selected entity has boarding malus\n"
     msg = msg .. "  setobjectwrecked 0|1 - Clear or set boarding malus"
     return 1, "", msg
@@ -39,16 +45,11 @@ end
 
 -- Show drop tables command
 function showDropTables(sender)
-    -- Dynamically load the UpgradeGenerator to get the actual weights used by the game/mods
-    local UpgradeGenerator = include("upgradegenerator")
-    if not UpgradeGenerator then
-        return 1, "", "Failed to load UpgradeGenerator"
-    end
-
     local generator = UpgradeGenerator()
     if not generator or not generator.scripts then
         return 1, "", "Failed to instantiate UpgradeGenerator"
     end
+
 
     local dropTable = {}
     for script, data in pairs(generator.scripts) do
@@ -87,6 +88,47 @@ function showDropTables(sender)
     if player then
         player:sendChatMessage("GCL Tweaks", ChatMessageType.Information, output)
     end
+
+    return 0, "", ""
+end
+
+-- Set drop rate multiplier for a component
+function setDropRate(sender, component, multiplier)
+    local player = Player(sender)
+    if not player then return 1, "", "Player not found" end
+
+    if not component or not multiplier then
+        return 1, "",
+            "Usage: /gcl_tweak setdroprate <component> <multiplier>\nExample: /gcl_tweak setdroprate autoturret 0.1"
+    end
+
+    local multValue = tonumber(multiplier)
+    if not multValue or multValue < 0 then
+        return 1, "", "Multiplier must be a non-negative number."
+    end
+
+    -- Basic sanitation of component name (if user passes 'autotcs.lua' vs 'autotcs', handle both)
+    -- The key format expects the basename WITH extension if that's how UpgradeGenerator stores it,
+    -- but usually scripts are 'data/scripts/systems/file.lua'.
+    -- Our hook uses `scriptPath:match("([^/]+)$")` which means 'file.lua'.
+    -- So we should probably allow user to enable strict matching or just ensure they passed the filename.
+
+    -- If user passed "autotcs", start by assuming .lua if missing?
+    -- Vanilla files usually have .lua. Let's just trust exactly what they type but warn if it doesn't look like a filename.
+    -- Better: let's enforce '.lua' if missing to be helpful?
+    -- Most users will type 'civiltcs' not 'civiltcs.lua'.
+
+    if not component:match("%.lua$") then
+        component = component .. ".lua"
+    end
+
+    local key = "gcl_drop_mult_" .. component
+    Galaxy():setValue(key, multValue)
+
+    player:sendChatMessage("GCL Tweaks", ChatMessageType.Information,
+        string.format("Set drop multiplier for '%s' to %.2f (Key: %s)", component, multValue, key))
+    player:sendChatMessage("GCL Tweaks", ChatMessageType.Information,
+        "Run '/gcl_tweak showdroptables' to verify changes.")
 
     return 0, "", ""
 end
@@ -191,12 +233,13 @@ function getHelp()
     return [[Usage: /gcl_tweak <subcommand>
 
 Subcommands:
-  showdroptables      - Print system upgrade drop weights to chat
-  isobjectwrecked     - Check if selected entity has boarding malus (wrecked)
-  setobjectwrecked 0  - Clear boarding malus, restore durability
-  setobjectwrecked 1  - Set boarding malus (marks as wrecked)
+  showdroptables    - Print system upgrade drop weights to chat
+  setdroprate       - Set drop chance multiplier for a specific component
+  isobjectwrecked   - Check if selected entity has boarding malus (wrecked)
+  setobjectwrecked  - Set/Clear boarding malus
 
 Examples:
+  /gcl_tweak setdroprate civiltcs 0.1
   /gcl_tweak showdroptables
   /gcl_tweak isobjectwrecked
   /gcl_tweak setobjectwrecked 0]]

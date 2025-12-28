@@ -68,3 +68,25 @@ The repository uses GitHub Actions for automated Steam Workshop deployment.
 ### Troubleshooting
 - **Local Testing**: Always run `make test` before pushing.
 - **Steam Auth**: Deployment failures are often due to Steam Guard. Check the GitHub Actions logs.
+
+## Critical Modding Guidelines
+
+### Modifying Library Files (Include Injection)
+When extending vanilla library files (e.g. `upgradegenerator.lua`) that end with a `return` statement:
+
+1.  **Do NOT** perform a full file override (copy-paste) unless absolutely necessary.
+2.  **Use `include()` injection**. Avorion's `include()` mechanism effectively concatenates mod files *before* the `return` statement of the vanilla file.
+3.  **Local Access**: Because your code is injected into the same chunk, you can access `local` variables defined in the vanilla file (like `UpgradeGenerator`).
+4.  **Hook Pattern**:
+    ```lua
+    -- Capture original function
+    local oldInitialize = UpgradeGenerator.initialize
+    -- Redefine with wrapper
+    function UpgradeGenerator:initialize(...)
+        if oldInitialize then oldInitialize(self, ...) end
+        -- Your custom logic here
+    end
+    ```
+5.  **Use `include()`** instead of `require()` ensures correct mod loading behavior.
+
+Ref: https://avorion.fandom.com/wiki/Writing_your_own_Mod#Using_include()

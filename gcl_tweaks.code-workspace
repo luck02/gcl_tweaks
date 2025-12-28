@@ -16,7 +16,6 @@
 	"settings": {
 		"files.exclude": {
 			"mods": true,
-			"galaxies": true,
 			"backups": true,
 			"**/.git": true,
 			"**/.DS_Store": true
