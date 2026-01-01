@@ -252,29 +252,90 @@ if onClient() then
     end
 
     function GclConsole.onTradeRefresh()
-        GclConsole.refreshTradeData()
+        invokeServerFunction("getTradeStatsForClient")
     end
 
     function GclConsole.onTradeReset()
-        -- TODO: Implement reset via server call
+        invokeServerFunction("resetTradeStats")
         if tradeListBox then
             tradeListBox:clear()
             tradeListBox:addEntry("Statistics reset.", nil)
         end
     end
 
-    -- Refresh trade data display
+    -- Receive trade stats from server
+    function GclConsole.receiveTradeStats(stats)
+        if not tradeListBox then return end
+
+        tradeListBox:clear()
+
+        if not stats or not stats.totals then
+            tradeListBox:addEntry("No trade data available.", nil)
+            return
+        end
+
+        -- Format currency helper
+        local function formatMoney(amount)
+            return string.format("¢%s", tostring(math.floor(amount or 0)))
+        end
+
+        -- Header
+        local totalProfit = stats.totals.totalProfit or 0
+        local profitColor = totalProfit >= 0 and "\\c(0f0)" or "\\c(f00)"
+        tradeListBox:addEntry(string.format("=== Trade Summary (%d trades) ===", stats.totals.tradeCount or 0), nil)
+        tradeListBox:addEntry(string.format("Total Revenue: %s", formatMoney(stats.totals.totalRevenue)), nil)
+        tradeListBox:addEntry(string.format("Total Cost:    %s", formatMoney(stats.totals.totalCost)), nil)
+        tradeListBox:addEntry(string.format("Net Profit:    %s", formatMoney(totalProfit)), nil)
+        tradeListBox:addEntry("", nil)
+
+        if groupMode == "station" then
+            tradeListBox:addEntry("=== By Station ===", nil)
+            local hasData = false
+            for stationName, data in pairs(stats.byStation or {}) do
+                hasData = true
+                local profit = (data.earned or 0) - (data.spent or 0)
+                tradeListBox:addEntry(string.format("%s", stationName), nil)
+                tradeListBox:addEntry(string.format("  Earned: %s  |  Spent: %s  |  Profit: %s",
+                    formatMoney(data.earned), formatMoney(data.spent), formatMoney(profit)), nil)
+            end
+            if not hasData then
+                tradeListBox:addEntry("  (No station data yet)", nil)
+            end
+        else
+            tradeListBox:addEntry("=== By Good ===", nil)
+            local hasData = false
+            for goodName, data in pairs(stats.byGood or {}) do
+                hasData = true
+                local profit = (data.earned or 0) - (data.spent or 0)
+                tradeListBox:addEntry(string.format("%s", goodName), nil)
+                tradeListBox:addEntry(string.format("  Sold: %d (%s)  |  Bought: %d (%s)  |  Profit: %s",
+                    data.sold or 0, formatMoney(data.earned),
+                    data.bought or 0, formatMoney(data.spent),
+                    formatMoney(profit)), nil)
+            end
+            if not hasData then
+                tradeListBox:addEntry("  (No goods data yet)", nil)
+            end
+        end
+    end
+
+    -- Refresh trade data display (initial placeholder before server response)
     function GclConsole.refreshTradeData()
         if not tradeListBox then return end
 
         tradeListBox:clear()
-        tradeListBox:addEntry("Refreshing trade data...", nil)
-        tradeListBox:addEntry("(Trade tracking not yet implemented)", nil)
+        tradeListBox:addEntry("Loading trade data...", nil)
+
+        -- Request data from server
+        invokeServerFunction("getTradeStatsForClient")
     end
 end -- if onClient()
 
 -- SERVER-SIDE IMPLEMENTATION
 if onServer() then
+    -- Trade data storage key
+    local TRADE_STATS_KEY = "gcl_trade_stats"
+
     -- Send output to the client via direct RPC
     -- This is called by commands via player:invokeFunction()
     function GclConsole.sendOutput(output)
@@ -291,6 +352,193 @@ if onServer() then
     end
 
     callable(GclConsole, "sendOutput")
+
+    -- Initialize trade tracking
+    function GclConsole.initialize()
+        local player = Player()
+        if not player then return end
+
+        -- Register for trading callbacks
+        player:registerCallback("onTradingManagerSellToPlayer", "onTradingManagerSellToPlayer")
+        player:registerCallback("onTradingManagerBuyFromPlayer", "onTradingManagerBuyFromPlayer")
+
+        print("[GCL Console] Server-side trade tracking initialized for " .. player.name)
+    end
+
+    -- Get current trade stats from player values
+    function GclConsole.getTradeStats()
+        local player = Player()
+        if not player then return {} end
+
+        local statsJson = player:getValue(TRADE_STATS_KEY)
+        if not statsJson then
+            -- Initialize empty stats structure
+            return {
+                byStation = {},
+                byGood = {},
+                totals = {
+                    totalRevenue = 0,
+                    totalCost = 0,
+                    totalProfit = 0,
+                    tradeCount = 0
+                }
+            }
+        end
+
+        -- Parse JSON (simple table for now)
+        -- Note: Avorion stores tables directly, no JSON parsing needed
+        return statsJson
+    end
+
+    -- Save trade stats to player values
+    function GclConsole.saveTradeStats(stats)
+        local player = Player()
+        if not player then return end
+
+        player:setValue(TRADE_STATS_KEY, stats)
+    end
+
+    -- Record a sale (station sold to player = player revenue when player resells)
+    -- This is called when a station SELLS goods TO the player
+    -- From player's trading perspective: player BOUGHT goods (expense)
+    function GclConsole.recordPurchase(goodName, amount, price, stationName)
+        local stats = GclConsole.getTradeStats()
+
+        -- Update by-good stats
+        if not stats.byGood[goodName] then
+            stats.byGood[goodName] = {
+                bought = 0,
+                sold = 0,
+                spent = 0,
+                earned = 0
+            }
+        end
+        stats.byGood[goodName].bought = stats.byGood[goodName].bought + amount
+        stats.byGood[goodName].spent = stats.byGood[goodName].spent + price
+
+        -- Update by-station stats
+        if stationName and stationName ~= "" then
+            if not stats.byStation[stationName] then
+                stats.byStation[stationName] = {
+                    bought = 0,
+                    sold = 0,
+                    spent = 0,
+                    earned = 0,
+                    goods = {}
+                }
+            end
+            stats.byStation[stationName].bought = stats.byStation[stationName].bought + amount
+            stats.byStation[stationName].spent = stats.byStation[stationName].spent + price
+
+            -- Track goods per station
+            if not stats.byStation[stationName].goods[goodName] then
+                stats.byStation[stationName].goods[goodName] = { bought = 0, sold = 0, spent = 0, earned = 0 }
+            end
+            stats.byStation[stationName].goods[goodName].bought = stats.byStation[stationName].goods[goodName].bought +
+                amount
+            stats.byStation[stationName].goods[goodName].spent = stats.byStation[stationName].goods[goodName].spent +
+                price
+        end
+
+        -- Update totals
+        stats.totals.totalCost = stats.totals.totalCost + price
+        stats.totals.totalProfit = stats.totals.totalRevenue - stats.totals.totalCost
+        stats.totals.tradeCount = stats.totals.tradeCount + 1
+
+        GclConsole.saveTradeStats(stats)
+    end
+
+    -- Record a purchase (station bought from player = player sold goods)
+    -- This is called when a station BUYS goods FROM the player
+    -- From player's trading perspective: player SOLD goods (revenue)
+    function GclConsole.recordSale(goodName, amount, price, stationName)
+        local stats = GclConsole.getTradeStats()
+
+        -- Update by-good stats
+        if not stats.byGood[goodName] then
+            stats.byGood[goodName] = {
+                bought = 0,
+                sold = 0,
+                spent = 0,
+                earned = 0
+            }
+        end
+        stats.byGood[goodName].sold = stats.byGood[goodName].sold + amount
+        stats.byGood[goodName].earned = stats.byGood[goodName].earned + price
+
+        -- Update by-station stats
+        if stationName and stationName ~= "" then
+            if not stats.byStation[stationName] then
+                stats.byStation[stationName] = {
+                    bought = 0,
+                    sold = 0,
+                    spent = 0,
+                    earned = 0,
+                    goods = {}
+                }
+            end
+            stats.byStation[stationName].sold = stats.byStation[stationName].sold + amount
+            stats.byStation[stationName].earned = stats.byStation[stationName].earned + price
+
+            -- Track goods per station
+            if not stats.byStation[stationName].goods[goodName] then
+                stats.byStation[stationName].goods[goodName] = { bought = 0, sold = 0, spent = 0, earned = 0 }
+            end
+            stats.byStation[stationName].goods[goodName].sold = stats.byStation[stationName].goods[goodName].sold +
+                amount
+            stats.byStation[stationName].goods[goodName].earned = stats.byStation[stationName].goods[goodName].earned +
+                price
+        end
+
+        -- Update totals
+        stats.totals.totalRevenue = stats.totals.totalRevenue + price
+        stats.totals.totalProfit = stats.totals.totalRevenue - stats.totals.totalCost
+        stats.totals.tradeCount = stats.totals.tradeCount + 1
+
+        GclConsole.saveTradeStats(stats)
+    end
+
+    -- Reset all trade stats
+    function GclConsole.resetTradeStats()
+        local player = Player()
+        if not player then return end
+
+        player:setValue(TRADE_STATS_KEY, nil)
+        print("[GCL Console] Trade statistics reset for " .. player.name)
+    end
+
+    callable(GclConsole, "resetTradeStats")
+
+    -- Get trade stats for client display
+    function GclConsole.getTradeStatsForClient()
+        local stats = GclConsole.getTradeStats()
+        local player = Player()
+        if player then
+            invokeClientFunction(player, "receiveTradeStats", stats)
+        end
+    end
+
+    callable(GclConsole, "getTradeStatsForClient")
+end
+
+-- Trading callbacks (must be global for registerCallback)
+function onTradingManagerSellToPlayer(goodName, amount, price)
+    -- Station SOLD to player = player BOUGHT (expense)
+    -- Try to get the station name from Entity()
+    local entity = Entity()
+    local stationName = entity and entity.name or "Unknown Station"
+
+    print("[GCL Trade] Player bought " .. amount .. " " .. goodName .. " for " .. price .. " from " .. stationName)
+    GclConsole.recordPurchase(goodName, amount, price, stationName)
+end
+
+function onTradingManagerBuyFromPlayer(goodName, amount, price)
+    -- Station BOUGHT from player = player SOLD (revenue)
+    local entity = Entity()
+    local stationName = entity and entity.name or "Unknown Station"
+
+    print("[GCL Trade] Player sold " .. amount .. " " .. goodName .. " for " .. price .. " to " .. stationName)
+    GclConsole.recordSale(goodName, amount, price, stationName)
 end
 
 -- Global callback wrappers (UI buttons call global functions)
