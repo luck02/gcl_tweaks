@@ -15,15 +15,52 @@
 	],
 	"settings": {
 		"files.exclude": {
-			"mods": true,
 			"backups": true,
 			"**/.git": true,
 			"**/.DS_Store": true
 		},
 		"search.exclude": {
-			"mods": true,
 			"galaxies": true,
 			"backups": true
-		}
+		},
+		"Lua.diagnostics.libraryFiles": "Disable",
+		"Lua.diagnostics.workspaceDelay": -1,
+		"Lua.diagnostics.globals": [
+			"onClient",
+			"onServer",
+			"Player",
+			"Entity",
+			"Sector",
+			"Galaxy",
+			"Server",
+			"Hud",
+			"Keyboard",
+			"KeyboardKey",
+			"invokeClientFunction",
+			"callable",
+			"getResolution",
+			"vec2",
+			"Rect",
+			"include",
+			"MalusReason"
+		],
+		"Lua.diagnostics.disable": [
+			"lowercase-global",
+			"undefined-field"
+		],
+		"Lua.workspace.library": [
+			"/home/garylucas/.steam/steam/steamapps/common/Avorion/data/scripts",
+			"/home/garylucas/.avorion/mods"
+		],
+		"Lua.workspace.ignoreDir": [
+			".vscode",
+			".github",
+			".git",
+			"/home/garylucas/.avorion",
+			"/home/garylucas/.steam/steam/steamapps/common/Avorion"
+		],
+		"Lua.workspace.checkThirdParty": false,
+		"Lua.workspace.useGitIgnore": false,
+		"Lua.runtime.version": "Lua 5.3"
 	}
 }

@@ -43,6 +43,35 @@ function showHelp()
     return 1, "", msg
 end
 
+-- Helper: Send output to client console window
+-- Uses direct RPC via player:invokeFunction() to push data immediately
+-- Falls back to chat if console script is not loaded
+-- Returns: (errorCode, errorMsg, chatMsg) tuple for command return
+function sendToConsole(sender, output)
+    local player = Player(sender)
+    if not player then return 1, "", "Player not found" end
+
+    -- Check if player has the console script attached
+    local hasConsole = player:hasScript("gcl_console.lua")
+
+    if hasConsole then
+        -- Use direct RPC: call the player script's sendOutput function
+        -- This triggers invokeClientFunction to push data immediately to client
+        local ok, err = player:invokeFunction("gcl_console.lua", "sendOutput", output)
+        if ok == 0 then
+            print("[GCL] Console output sent via RPC")
+            return 0, "", ""
+        else
+            print("[GCL] RPC failed: " .. tostring(err) .. ", falling back to chat")
+            return 0, "", output
+        end
+    else
+        -- Fallback: console script not loaded, use chat
+        print("[GCL] Console script not found, using chat fallback")
+        return 0, "", output
+    end
+end
+
 -- Show drop tables command
 function showDropTables(sender)
     local generator = UpgradeGenerator()
@@ -91,13 +120,8 @@ function showDropTables(sender)
     print(fullOutput)
     print("=== END DROP TABLES ===")
 
-    -- Send to player (full output - shows in client log)
-    local player = Player(sender)
-    if player then
-        player:sendChatMessage("GCL Tweaks", ChatMessageType.Information, fullOutput)
-    end
-
-    return 0, "", ""
+    -- Send to client console window (or chat as fallback)
+    return sendToConsole(sender, fullOutput)
 end
 
 -- Set drop rate multiplier for a component
@@ -133,12 +157,10 @@ function setDropRate(sender, component, multiplier)
     local key = "gcl_drop_mult_" .. component
     Server():setValue(key, multValue)
 
-    player:sendChatMessage("GCL Tweaks", ChatMessageType.Information,
-        string.format("Set drop multiplier for '%s' to %.2f (Key: %s)", component, multValue, key))
-    player:sendChatMessage("GCL Tweaks", ChatMessageType.Information,
-        "Run '/gcl_tweak showdroptables' to verify changes.")
-
-    return 0, "", ""
+    local msg = string.format(
+        "Set drop multiplier for '%s' to %.2f (Key: %s)\nRun '/gcl_tweak showdroptables' to verify changes.", component,
+        multValue, key)
+    return sendToConsole(sender, msg)
 end
 
 -- Check if selected object has boarding malus
@@ -180,9 +202,7 @@ function isObjectWrecked(sender)
     local msg = string.format("Entity: %s\nMalus Factor: %.2f\nMalus Reason: %s\nWrecked (Boarding): %s",
         name, factor or 1.0, reasonStr, isWrecked and "YES" or "NO")
 
-    player:sendChatMessage("GCL Tweaks", ChatMessageType.Information, msg)
-
-    return 0, "", ""
+    return sendToConsole(sender, msg)
 end
 
 -- Set or clear boarding malus on selected object
@@ -221,16 +241,14 @@ function setObjectWrecked(sender, value)
         if target.durability and target.maxDurability then
             target.durability = target.maxDurability
         end
-        player:sendChatMessage("GCL Tweaks", ChatMessageType.Information,
-            string.format("Cleared wrecked state on '%s'. Malus reset to 1.0, durability restored.", name))
+        local msg = string.format("Cleared wrecked state on '%s'. Malus reset to 1.0, durability restored.", name)
+        return sendToConsole(sender, msg)
     else
         -- Set the boarding malus (typical boarding malus is 0.5)
         target:setMalusFactor(0.5, MalusReason.Boarding)
-        player:sendChatMessage("GCL Tweaks", ChatMessageType.Information,
-            string.format("Set wrecked state on '%s'. Malus set to 0.5 with Boarding reason.", name))
+        local msg = string.format("Set wrecked state on '%s'. Malus set to 0.5 with Boarding reason.", name)
+        return sendToConsole(sender, msg)
     end
-
-    return 0, "", ""
 end
 
 function getDescription()

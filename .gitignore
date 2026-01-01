@@ -1,0 +1,29 @@
+# Lua compiled files
+*.luac
+
+# Editor/IDE files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.zip
+
+# Steam deployment (generated files)
+steam_build/
+
+# Logs
+*.log
+
+# Backup files
+*.bak
+*.orig
