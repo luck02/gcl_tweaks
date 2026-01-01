@@ -33,6 +33,7 @@ local groupByStationBtn = nil
 local groupByGoodBtn = nil
 local refreshBtn = nil
 local resetBtn = nil
+local scanSectorBtn = nil
 local groupMode = "station" -- "station" or "good"
 
 -- CLIENT-SIDE IMPLEMENTATION
@@ -120,22 +121,29 @@ if onClient() then
             "onTradeReset"
         )
 
-        -- Trade data ListBox
-        local listTop = buttonY + buttonHeight + 10
+        -- Second row: Scan Sector button
+        local row2Y = buttonY + buttonHeight + 5
+        scanSectorBtn = tab:createButton(
+            Rect(5, row2Y, 5 + buttonWidth + 20, row2Y + buttonHeight),
+            "Scan Sector",
+            "onScanSector"
+        )
+
+        -- Trade data ListBox (moved down to make room for second row)
+        local listTop = row2Y + buttonHeight + 10
         tradeListBox = tab:createListBox(Rect(vec2(0, listTop), vec2(tabSize.x, tabSize.y - 10)))
         tradeListBox.fontSize = 12
 
         -- Initial button states
         GclConsole.updateGroupButtons()
 
-        -- Add placeholder text
-        tradeListBox:addEntry("Trade statistics will appear here once", nil)
-        tradeListBox:addEntry("the tracking system is implemented.", nil)
+        -- Add initial instructions
+        tradeListBox:addEntry("=== Trade Statistics ===", nil)
         tradeListBox:addEntry("", nil)
-        tradeListBox:addEntry("Coming soon:", nil)
-        tradeListBox:addEntry("  - Revenue from station trades", nil)
-        tradeListBox:addEntry("  - Profit per production cycle", nil)
-        tradeListBox:addEntry("  - Group by Station or by Good", nil)
+        tradeListBox:addEntry("Click 'Refresh' to load current stats.", nil)
+        tradeListBox:addEntry("", nil)
+        tradeListBox:addEntry("Click 'Scan Sector' while near your stations", nil)
+        tradeListBox:addEntry("to import their historical trade data.", nil)
     end
 
     -- Update group button visual states
@@ -261,6 +269,32 @@ if onClient() then
             tradeListBox:clear()
             tradeListBox:addEntry("Statistics reset.", nil)
         end
+    end
+
+    -- Scan sector for owned stations
+    function GclConsole.onScanSector()
+        if tradeListBox then
+            tradeListBox:clear()
+            tradeListBox:addEntry("Scanning sector for owned stations...", nil)
+        end
+        invokeServerFunction("scanAndGetStats")
+    end
+
+    -- Receive scan results from server
+    function GclConsole.receiveScanResult(scannedCount, stats)
+        if not tradeListBox then return end
+
+        tradeListBox:clear()
+
+        if scannedCount > 0 then
+            tradeListBox:addEntry(string.format("=== Scan Complete: Imported from %d station(s) ===", scannedCount), nil)
+        else
+            tradeListBox:addEntry("=== Scan Complete: No new data to import ===", nil)
+        end
+        tradeListBox:addEntry("", nil)
+
+        -- Now display the stats
+        GclConsole.receiveTradeStats(stats)
     end
 
     -- Receive trade stats from server
@@ -519,6 +553,139 @@ if onServer() then
     end
 
     callable(GclConsole, "getTradeStatsForClient")
+
+    -- Scan all owned stations in current sector and import their historical stats
+    -- This captures trade data from before the mod was installed
+    function GclConsole.scanOwnedStations()
+        local player = Player()
+        if not player then return 0 end
+
+        local sector = Sector()
+        if not sector then
+            print("[GCL Trade] No sector available for scanning")
+            return 0
+        end
+
+        local playerFactionIndex = player.index
+        local allianceIndex = player.allianceIndex
+
+        -- Get all stations in the sector
+        local stations = { sector:getEntitiesByType(EntityType.Station) }
+        local scannedCount = 0
+        local stats = GclConsole.getTradeStats()
+
+        -- Initialize station history tracking if needed
+        if not stats.stationHistory then
+            stats.stationHistory = {}
+        end
+
+        for _, station in pairs(stations) do
+            -- Check if player or alliance owns this station
+            local isOwned = station.factionIndex == playerFactionIndex
+            if allianceIndex and station.factionIndex == allianceIndex then
+                isOwned = true
+            end
+
+            if isOwned then
+                local stationName = station.name or "Unknown Station"
+                local stationId = tostring(station.id)
+
+                -- Try to get factory stats via script
+                local hasFactory = station:hasScript("factory.lua")
+                local hasConsumer = station:hasScript("consumer.lua")
+                local hasTradingPost = station:hasScript("tradingpost.lua")
+
+                if hasFactory or hasConsumer or hasTradingPost then
+                    -- Try to invoke function to get trader stats
+                    -- Since there's no callable getStats, we need to access via the TradingAPI secure method
+                    local scriptName = hasFactory and "factory.lua" or
+                        (hasConsumer and "consumer.lua" or "tradingpost.lua")
+
+                    -- Access the trader stats through secure data
+                    local ok, data = station:invokeFunction(scriptName, "secure")
+
+                    if ok == 0 and data and data.stats then
+                        local traderStats = data.stats
+
+                        -- Check if we've already imported this station's data
+                        local previousImport = stats.stationHistory[stationId]
+                        local prevSpent = previousImport and previousImport.moneySpentOnGoods or 0
+                        local prevGained = previousImport and previousImport.moneyGainedFromGoods or 0
+
+                        -- Calculate delta (new trades since last import)
+                        local deltaSpent = (traderStats.moneySpentOnGoods or 0) - prevSpent
+                        local deltaGained = (traderStats.moneyGainedFromGoods or 0) - prevGained
+
+                        -- Only import if there's new data
+                        if deltaSpent > 0 or deltaGained > 0 then
+                            -- Update by-station stats (from station's perspective)
+                            -- Station spent = station bought goods (our factory bought ingredients)
+                            -- Station gained = station sold goods (our factory sold products)
+                            if not stats.byStation[stationName] then
+                                stats.byStation[stationName] = {
+                                    bought = 0,
+                                    sold = 0,
+                                    spent = 0,
+                                    earned = 0,
+                                    goods = {},
+                                    isOwnedStation = true
+                                }
+                            end
+
+                            stats.byStation[stationName].isOwnedStation = true
+
+                            -- For owned stations, "spent" is what the factory spent on ingredients
+                            -- "earned" is what the factory earned selling products
+                            stats.byStation[stationName].spent = stats.byStation[stationName].spent + deltaSpent
+                            stats.byStation[stationName].earned = stats.byStation[stationName].earned + deltaGained
+
+                            -- Update totals (from player perspective with owned stations)
+                            -- Factory earning = our revenue
+                            -- Factory spending = our cost
+                            stats.totals.totalRevenue = stats.totals.totalRevenue + deltaGained
+                            stats.totals.totalCost = stats.totals.totalCost + deltaSpent
+                            stats.totals.totalProfit = stats.totals.totalRevenue - stats.totals.totalCost
+
+                            -- Record this import to avoid double-counting
+                            stats.stationHistory[stationId] = {
+                                moneySpentOnGoods = traderStats.moneySpentOnGoods or 0,
+                                moneyGainedFromGoods = traderStats.moneyGainedFromGoods or 0,
+                                lastImport = os.time and os.time() or 0
+                            }
+
+                            scannedCount = scannedCount + 1
+                            print(string.format("[GCL Trade] Imported stats from %s: earned +%d, spent +%d",
+                                stationName, deltaGained, deltaSpent))
+                        end
+                    else
+                        print(string.format("[GCL Trade] Could not get stats from %s (script: %s, result: %s)",
+                            stationName, scriptName, tostring(ok)))
+                    end
+                end
+            end
+        end
+
+        if scannedCount > 0 then
+            GclConsole.saveTradeStats(stats)
+        end
+
+        print(string.format("[GCL Trade] Scanned sector: imported stats from %d stations", scannedCount))
+        return scannedCount
+    end
+
+    callable(GclConsole, "scanOwnedStations")
+
+    -- Scan and then return stats to client
+    function GclConsole.scanAndGetStats()
+        local scanned = GclConsole.scanOwnedStations()
+        local stats = GclConsole.getTradeStats()
+        local player = Player()
+        if player then
+            invokeClientFunction(player, "receiveScanResult", scanned, stats)
+        end
+    end
+
+    callable(GclConsole, "scanAndGetStats")
 end
 
 -- Trading callbacks (must be global for registerCallback)
@@ -560,4 +727,8 @@ end
 
 function onTradeReset()
     GclConsole.onTradeReset()
+end
+
+function onScanSector()
+    GclConsole.onScanSector()
 end
