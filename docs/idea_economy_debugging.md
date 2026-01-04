@@ -100,16 +100,66 @@ Graph view of production chains:
 
 ## Implementation Phases
 
-| Phase | Description | Effort |
+| Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | Basic status column in existing scan | Low |
-| 2 | Ingredient shortfall detection (current sector) | Medium |
-| 3 | Cross-sector status estimation (heuristic) | Medium |
-| 4 | Supply chain visualization | High |
+| 1 | Basic status column in Trade tab | ✅ Complete (v1.4.1) |
+| 2 | Detailed diagnostics when sector is loaded | 🔲 Next |
+| 3 | Proactive alerts for state transitions | 🔲 Future |
+| 4 | Supply chain visualization | 🔲 Future |
 
-## Open Questions
+---
 
-1. Which option(s) to implement first?
-2. Cross-sector detection: all stations (heuristics) or only current-sector?
-3. Alert mechanism: in-console, chat, or both?
-4. Supply chain depth: direct links or full chain?
+## Phase 1 Implementation Summary (v1.4.1)
+
+### What Was Built
+- **Status column** added to Trade tab between Station and Sector
+- **Color-coded indicators**: OK (green), IDLE (orange), WARNING (yellow), HALTED (red)
+- **Heuristic detection** using `currentProductions` count from secured values
+- **Tooltips** show specific issue details on hover
+- **Inclusive display**: Stations with issues appear even without trade history
+
+### Technical Details
+- Detection via `ShipDatabaseEntry:getSecuredScriptValues()` 
+- Factory detection: Looking for `maxNumProductions` field
+- IDLE = factory with `currentProductions == 0`
+- Cross-sector compatible (no sector loading required)
+
+### Limitation Discovered
+`productionError` (the actual error message like "missing ingredients") is NOT persisted to secured values - it's runtime only. Detailed diagnostics require the sector to be loaded.
+
+### Files Modified
+- `data/scripts/player/gcl_console.lua`: `buildTradeTab()`, `receiveAllStationsStats()`, `scanAllStations()`
+
+---
+
+## Phase 2 Scope: Detailed Diagnostics
+
+**Goal**: When the player visits a sector with IDLE/WARNING stations, provide detailed diagnostics.
+
+### Proposed Features
+1. **In-sector station query**: Use `invokeFunction()` to query `factory.lua` directly when sector is loaded
+2. **Ingredient shortfall details**: Show exactly which ingredients are missing and how many
+3. **Cargo fill percentage**: Detect "output full" scenarios
+4. **Refresh status**: Update status from IDLE → HALTED with actual error message
+
+### Technical Approach
+```lua
+-- When player enters sector, query local stations
+local ok, data = station:invokeFunction("factory.lua", "secure")
+if ok and data.productionError then
+    -- Update status with actual error
+end
+```
+
+### UI Enhancement
+- Click on IDLE station → detailed popup with ingredient breakdown
+- Or: Auto-refresh status for in-sector stations during scan
+
+---
+
+## Open Questions for Phase 2
+
+1. **Trigger**: Auto-detect sector entry or manual "Refresh Sector" button?
+2. **UI**: Popup dialog vs. expanded row details vs. tooltip enhancement?
+3. **Caching**: Cache detailed diagnostics or always query fresh?
+
