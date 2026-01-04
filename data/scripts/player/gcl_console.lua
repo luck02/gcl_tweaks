@@ -11,6 +11,9 @@ include("callable")
 -- AzimuthLib for tabbed window (workaround for buggy native TabbedWindow in Hud context)
 local CustomTabbedWindow = include("azimuthlib-customtabbedwindow")
 
+-- AzimuthLib basic for config persistence (setValue can't store tables)
+local Azimuth = include("azimuthlib-basic")
+
 -- Don't remove or alter the following comment, it tells the game the namespace this script lives in.
 -- namespace GclConsole
 GclConsole = {}
@@ -27,14 +30,17 @@ local tradeTab = nil
 local listBox = nil
 local clearButton = nil
 
--- Trade tab UI elements
-local tradeListBox = nil
-local groupByStationBtn = nil
-local groupByGoodBtn = nil
-local refreshBtn = nil
-local resetBtn = nil
-local scanSectorBtn = nil
-local groupMode = "station" -- "station" or "good"
+-- Trade tab UI elements (spreadsheet layout)
+local tradeStatusLabel = nil
+local scanNowBtn = nil
+local scanCooldownLabel = nil -- Shows countdown below button
+local tradeScrollFrame = nil
+local tradeRows = {}          -- Array of {frame, nameLabel, sectorLabel, revenueLabel, costsLabel, profitLabel}
+local tradeHeaderLabels = {}  -- Column headers
+local tradeTotalsLabels = {}  -- Totals row labels
+local MAX_TRADE_ROWS = 20     -- Maximum visible rows before scrolling
+local SCAN_COOLDOWN_TIME = 60 -- 60 seconds cooldown after scan
+local scanCooldown = 0        -- Remaining cooldown time
 
 -- CLIENT-SIDE IMPLEMENTATION
 if onClient() then
@@ -57,6 +63,9 @@ if onClient() then
         -- This works around the buggy native TabbedWindow in Hud context
         tabbedWindow = CustomTabbedWindow(GclConsole, window, Rect(vec2(5, 5), size - vec2(15, 15)))
 
+        -- Set up tab selection callback for persistence
+        tabbedWindow.onSelectedFunction = "onTabSelected"
+
         -- Create Console tab
         consoleTab = tabbedWindow:createTab("Console", "data/textures/icons/info.png", "Command Output")
         GclConsole.buildConsoleTab(consoleTab)
@@ -65,10 +74,30 @@ if onClient() then
         tradeTab = tabbedWindow:createTab("Trade", "data/textures/icons/money.png", "Trade Statistics")
         GclConsole.buildTradeTab(tradeTab)
 
+        -- Restore saved tab selection (default to Trade)
+        local savedTab = Player():getValue("gcl_console_tab") or "Trade"
+        local tabToSelect = tabbedWindow:getTab(savedTab)
+        if tabToSelect then
+            tabbedWindow:selectTab(tabToSelect)
+        end
+
         -- Start hidden
         window:hide()
 
         print("[GCL Console] Tabbed UI initialized. Press F9 to toggle visibility.")
+    end
+
+    -- Tab selection callback - save preference
+    function GclConsole.onTabSelected(tab)
+        -- Guard: Player() can return nil or partial object during early initialization
+        -- when createTab triggers this callback before the player is fully available
+        local ok, err = pcall(function()
+            local player = Player()
+            if tab and tab.name and player and player.setValue then
+                player:setValue("gcl_console_tab", tab.name)
+            end
+        end)
+        -- Silently ignore errors during initialization
     end
 
     -- Build the Console tab UI
@@ -87,76 +116,137 @@ if onClient() then
         )
     end
 
-    -- Build the Trade tab UI
+    -- Build the Trade tab UI (spreadsheet layout)
     function GclConsole.buildTradeTab(tab)
         local tabSize = tab.size
 
-        -- Header row with group toggle buttons
-        local buttonWidth = 120
-        local buttonHeight = 25
-        local buttonY = 5
+        -- Column definitions (x positions and widths)
+        local colStation = { x = 5, w = 220 }   -- Station name
+        local colSector = { x = 230, w = 60 }   -- Sector coords
+        local colRevenue = { x = 295, w = 100 } -- Revenue
+        local colCosts = { x = 400, w = 100 }   -- Costs
+        local colProfit = { x = 505, w = 100 }  -- Profit
 
-        groupByStationBtn = tab:createButton(
-            Rect(5, buttonY, 5 + buttonWidth, buttonY + buttonHeight),
-            "By Station",
-            "onGroupByStation"
+        local rowHeight = 22
+        local headerY = 5
+        local dataStartY = 55          -- After status + header row
+        local totalsY = tabSize.y - 35 -- Bottom area for totals
+
+        -- Status label at top left
+        tradeStatusLabel = tab:createLabel(
+            Rect(5, headerY, colSector.x - 10, headerY + 20),
+            "Trade scanning: checking...",
+            12
         )
 
-        groupByGoodBtn = tab:createButton(
-            Rect(10 + buttonWidth, buttonY, 10 + buttonWidth * 2, buttonY + buttonHeight),
-            "By Good",
-            "onGroupByGood"
+        -- Scan Now button (top right)
+        local buttonWidth = 80
+        scanNowBtn = tab:createButton(
+            Rect(tabSize.x - buttonWidth - 5, headerY, tabSize.x - 5, headerY + 22),
+            "Scan Now",
+            "onScanNow"
         )
+        scanNowBtn.tooltip = "Manually trigger a cross-sector scan"
 
-        -- Refresh and Reset buttons on the right
-        refreshBtn = tab:createButton(
-            Rect(tabSize.x - buttonWidth * 2 - 15, buttonY, tabSize.x - buttonWidth - 10, buttonY + buttonHeight),
-            "Refresh",
-            "onTradeRefresh"
+        -- Cooldown label (below button, right-aligned)
+        scanCooldownLabel = tab:createLabel(
+            Rect(tabSize.x - buttonWidth - 50, headerY + 24, tabSize.x - 5, headerY + 38),
+            "",
+            10
         )
+        scanCooldownLabel:setRightAligned()
+        scanCooldownLabel.color = ColorRGB(0.7, 0.7, 0.7)
 
-        resetBtn = tab:createButton(
-            Rect(tabSize.x - buttonWidth - 5, buttonY, tabSize.x - 5, buttonY + buttonHeight),
-            "Reset Stats",
-            "onTradeReset"
-        )
+        -- Header row (below status line)
+        local headerRowY = 30
+        tradeHeaderLabels = {}
 
-        -- Second row: Scan Sector button
-        local row2Y = buttonY + buttonHeight + 5
-        scanSectorBtn = tab:createButton(
-            Rect(5, row2Y, 5 + buttonWidth + 20, row2Y + buttonHeight),
-            "Scan Sector",
-            "onScanSector"
-        )
+        local headerFrame = tab:createFrame(Rect(0, headerRowY, tabSize.x, headerRowY + rowHeight))
+        headerFrame.backgroundColor = ColorARGB(0.3, 0.3, 0.4, 0.8)
 
-        -- Trade data ListBox (moved down to make room for second row)
-        local listTop = row2Y + buttonHeight + 10
-        tradeListBox = tab:createListBox(Rect(vec2(0, listTop), vec2(tabSize.x, tabSize.y - 10)))
-        tradeListBox.fontSize = 12
+        tradeHeaderLabels.station = tab:createLabel(
+            Rect(colStation.x, headerRowY + 2, colStation.x + colStation.w, headerRowY + rowHeight), "Station", 11)
+        tradeHeaderLabels.sector = tab:createLabel(
+            Rect(colSector.x, headerRowY + 2, colSector.x + colSector.w, headerRowY + rowHeight), "Sector", 11)
+        tradeHeaderLabels.revenue = tab:createLabel(
+            Rect(colRevenue.x, headerRowY + 2, colRevenue.x + colRevenue.w, headerRowY + rowHeight), "Revenue", 11)
+        tradeHeaderLabels.costs = tab:createLabel(
+            Rect(colCosts.x, headerRowY + 2, colCosts.x + colCosts.w, headerRowY + rowHeight), "Costs", 11)
+        tradeHeaderLabels.profit = tab:createLabel(
+            Rect(colProfit.x, headerRowY + 2, colProfit.x + colProfit.w, headerRowY + rowHeight), "Profit", 11)
 
-        -- Initial button states
-        GclConsole.updateGroupButtons()
+        -- Right-align numeric headers
+        tradeHeaderLabels.revenue:setRightAligned()
+        tradeHeaderLabels.costs:setRightAligned()
+        tradeHeaderLabels.profit:setRightAligned()
 
-        -- Add initial instructions
-        tradeListBox:addEntry("=== Trade Statistics ===", nil)
-        tradeListBox:addEntry("", nil)
-        tradeListBox:addEntry("Click 'Refresh' to load current stats.", nil)
-        tradeListBox:addEntry("", nil)
-        tradeListBox:addEntry("Click 'Scan Sector' while near your stations", nil)
-        tradeListBox:addEntry("to import their historical trade data.", nil)
-    end
+        -- Scroll frame for data rows
+        local scrollRect = Rect(0, dataStartY, tabSize.x, totalsY - 5)
+        tradeScrollFrame = tab:createScrollFrame(scrollRect)
 
-    -- Update group button visual states
-    function GclConsole.updateGroupButtons()
-        if not groupByStationBtn or not groupByGoodBtn then return end
+        -- Pre-allocate row UI elements inside scroll frame
+        tradeRows = {}
+        for i = 1, MAX_TRADE_ROWS do
+            local y = (i - 1) * rowHeight
+            local row = {}
 
-        if groupMode == "station" then
-            groupByStationBtn.pressed = true
-            groupByGoodBtn.pressed = false
-        else
-            groupByStationBtn.pressed = false
-            groupByGoodBtn.pressed = true
+            -- Alternating row background
+            if i % 2 == 0 then
+                row.frame = tradeScrollFrame:createFrame(Rect(0, y, tabSize.x - 20, y + rowHeight))
+                row.frame.backgroundColor = ColorARGB(0.15, 0.3, 0.3, 0.4)
+            end
+
+            row.nameLabel = tradeScrollFrame:createLabel(
+                Rect(colStation.x, y + 2, colStation.x + colStation.w, y + rowHeight), "", 11)
+            row.sectorLabel = tradeScrollFrame:createLabel(
+                Rect(colSector.x, y + 2, colSector.x + colSector.w, y + rowHeight), "", 11)
+            row.revenueLabel = tradeScrollFrame:createLabel(
+                Rect(colRevenue.x, y + 2, colRevenue.x + colRevenue.w, y + rowHeight), "", 11)
+            row.costsLabel = tradeScrollFrame:createLabel(
+                Rect(colCosts.x, y + 2, colCosts.x + colCosts.w, y + rowHeight), "", 11)
+            row.profitLabel = tradeScrollFrame:createLabel(
+                Rect(colProfit.x, y + 2, colProfit.x + colProfit.w, y + rowHeight), "", 11)
+
+            -- Right-align numeric columns
+            row.revenueLabel:setRightAligned()
+            row.costsLabel:setRightAligned()
+            row.profitLabel:setRightAligned()
+
+            -- Initially hidden
+            row.nameLabel:hide()
+            row.sectorLabel:hide()
+            row.revenueLabel:hide()
+            row.costsLabel:hide()
+            row.profitLabel:hide()
+            if row.frame then row.frame:hide() end
+
+            tradeRows[i] = row
         end
+
+        -- Totals row at bottom
+        local totalsFrame = tab:createFrame(Rect(0, totalsY, tabSize.x, totalsY + rowHeight + 5))
+        totalsFrame.backgroundColor = ColorARGB(0.4, 0.2, 0.4, 0.6)
+
+        tradeTotalsLabels = {}
+        tradeTotalsLabels.label = tab:createLabel(
+            Rect(colStation.x, totalsY + 3, colSector.x + colSector.w, totalsY + rowHeight), "Totals:", 12)
+        tradeTotalsLabels.revenue = tab:createLabel(
+            Rect(colRevenue.x, totalsY + 3, colRevenue.x + colRevenue.w, totalsY + rowHeight), "—", 12)
+        tradeTotalsLabels.costs = tab:createLabel(
+            Rect(colCosts.x, totalsY + 3, colCosts.x + colCosts.w, totalsY + rowHeight), "—", 12)
+        tradeTotalsLabels.profit = tab:createLabel(
+            Rect(colProfit.x, totalsY + 3, colProfit.x + colProfit.w, totalsY + rowHeight), "—", 12)
+
+        tradeTotalsLabels.revenue:setRightAligned()
+        tradeTotalsLabels.costs:setRightAligned()
+        tradeTotalsLabels.profit:setRightAligned()
+
+        -- Show initial "waiting" message
+        tradeRows[1].nameLabel.caption = "Waiting for scan data..."
+        tradeRows[1].nameLabel:show()
+
+        -- Request initial status
+        invokeServerFunction("getTradeStatus")
     end
 
     -- Get the parent player index (required for player scripts)
@@ -179,6 +269,28 @@ if onClient() then
         -- Update key cooldown
         if keyCooldown > 0 then
             keyCooldown = keyCooldown - timestep
+        end
+
+        -- Update scan button cooldown
+        if scanCooldown > 0 then
+            scanCooldown = scanCooldown - timestep
+            -- Update button and label state
+            if scanCooldown <= 0 then
+                if scanNowBtn then
+                    scanNowBtn.active = true
+                end
+                if scanCooldownLabel then
+                    scanCooldownLabel.caption = ""
+                end
+            else
+                -- Format as "0:nn Seconds"
+                local secs = math.ceil(scanCooldown)
+                local mins = math.floor(secs / 60)
+                local remainingSecs = secs % 60
+                if scanCooldownLabel then
+                    scanCooldownLabel.caption = string.format("%d:%02d Seconds", mins, remainingSecs)
+                end
+            end
         end
 
         -- Handle F9 toggle with debounce
@@ -247,121 +359,134 @@ if onClient() then
     end
 
     -- Trade tab button callbacks
-    function GclConsole.onGroupByStation()
-        groupMode = "station"
-        GclConsole.updateGroupButtons()
-        GclConsole.refreshTradeData()
+
+    -- Manual scan button
+    function GclConsole.onScanNow()
+        -- Ignore if on cooldown (safety check - button should be disabled)
+        if scanCooldown > 0 then return end
+
+        -- Start cooldown and disable button
+        scanCooldown = SCAN_COOLDOWN_TIME
+        if scanNowBtn then
+            scanNowBtn.active = false
+        end
+        if scanCooldownLabel then
+            -- Format as "0:nn Seconds"
+            local secs = math.ceil(SCAN_COOLDOWN_TIME)
+            local mins = math.floor(secs / 60)
+            local remainingSecs = secs % 60
+            scanCooldownLabel.caption = string.format("%d:%02d Seconds", mins, remainingSecs)
+        end
+
+        -- Show scanning message in first row
+        for i, row in ipairs(tradeRows) do
+            row.nameLabel:hide()
+            row.sectorLabel:hide()
+            row.revenueLabel:hide()
+            row.costsLabel:hide()
+            row.profitLabel:hide()
+            if row.frame then row.frame:hide() end
+        end
+        tradeRows[1].nameLabel.caption = "Scanning all sectors..."
+        tradeRows[1].nameLabel:show()
+
+        invokeServerFunction("scanAllStations")
     end
 
-    function GclConsole.onGroupByGood()
-        groupMode = "good"
-        GclConsole.updateGroupButtons()
-        GclConsole.refreshTradeData()
-    end
-
-    function GclConsole.onTradeRefresh()
-        invokeServerFunction("getTradeStatsForClient")
-    end
-
-    function GclConsole.onTradeReset()
-        invokeServerFunction("resetTradeStats")
-        if tradeListBox then
-            tradeListBox:clear()
-            tradeListBox:addEntry("Statistics reset.", nil)
+    -- Receive status update from server
+    function GclConsole.receiveTradeStatus(enabled, stationCount)
+        if tradeStatusLabel then
+            if enabled then
+                tradeStatusLabel.caption = string.format(
+                    "Scanning: ON (%d)",
+                    stationCount or 0
+                )
+                tradeStatusLabel.color = ColorRGB(0.3, 1.0, 0.3) -- green
+            else
+                tradeStatusLabel.caption = "Scanning: OFF"
+                tradeStatusLabel.color = ColorRGB(1.0, 0.5, 0.3) -- orange
+            end
         end
     end
 
-    -- Scan sector for owned stations
-    function GclConsole.onScanSector()
-        if tradeListBox then
-            tradeListBox:clear()
-            tradeListBox:addEntry("Scanning sector for owned stations...", nil)
-        end
-        invokeServerFunction("scanAndGetStats")
-    end
+    -- Receive cross-sector scan results from server
+    function GclConsole.receiveAllStationsStats(results)
+        if not tradeRows or #tradeRows == 0 then return end
 
-    -- Receive scan results from server
-    function GclConsole.receiveScanResult(scannedCount, stats)
-        if not tradeListBox then return end
-
-        tradeListBox:clear()
-
-        if scannedCount > 0 then
-            tradeListBox:addEntry(string.format("=== Scan Complete: Imported from %d station(s) ===", scannedCount), nil)
-        else
-            tradeListBox:addEntry("=== Scan Complete: No new data to import ===", nil)
-        end
-        tradeListBox:addEntry("", nil)
-
-        -- Now display the stats
-        GclConsole.receiveTradeStats(stats)
-    end
-
-    -- Receive trade stats from server
-    function GclConsole.receiveTradeStats(stats)
-        if not tradeListBox then return end
-
-        tradeListBox:clear()
-
-        if not stats or not stats.totals then
-            tradeListBox:addEntry("No trade data available.", nil)
-            return
-        end
-
-        -- Format currency helper
+        -- Format currency helper (uses Avorion's built-in formatting with thousand separators)
         local function formatMoney(amount)
-            return string.format("¢%s", tostring(math.floor(amount or 0)))
+            return "¢" .. createMonetaryString(math.floor(amount or 0))
         end
 
-        -- Header
-        local totalProfit = stats.totals.totalProfit or 0
-        local profitColor = totalProfit >= 0 and "\\c(0f0)" or "\\c(f00)"
-        tradeListBox:addEntry(string.format("=== Trade Summary (%d trades) ===", stats.totals.tradeCount or 0), nil)
-        tradeListBox:addEntry(string.format("Total Revenue: %s", formatMoney(stats.totals.totalRevenue)), nil)
-        tradeListBox:addEntry(string.format("Total Cost:    %s", formatMoney(stats.totals.totalCost)), nil)
-        tradeListBox:addEntry(string.format("Net Profit:    %s", formatMoney(totalProfit)), nil)
-        tradeListBox:addEntry("", nil)
+        -- Sort stations by profit descending
+        table.sort(results.stations, function(a, b)
+            local profitA = a.moneyGained + a.moneyTax - a.moneySpent
+            local profitB = b.moneyGained + b.moneyTax - b.moneySpent
+            return profitA > profitB
+        end)
 
-        if groupMode == "station" then
-            tradeListBox:addEntry("=== By Station ===", nil)
-            local hasData = false
-            for stationName, data in pairs(stats.byStation or {}) do
-                hasData = true
-                local profit = (data.earned or 0) - (data.spent or 0)
-                tradeListBox:addEntry(string.format("%s", stationName), nil)
-                tradeListBox:addEntry(string.format("  Earned: %s  |  Spent: %s  |  Profit: %s",
-                    formatMoney(data.earned), formatMoney(data.spent), formatMoney(profit)), nil)
-            end
-            if not hasData then
-                tradeListBox:addEntry("  (No station data yet)", nil)
-            end
-        else
-            tradeListBox:addEntry("=== By Good ===", nil)
-            local hasData = false
-            for goodName, data in pairs(stats.byGood or {}) do
-                hasData = true
-                local profit = (data.earned or 0) - (data.spent or 0)
-                tradeListBox:addEntry(string.format("%s", goodName), nil)
-                tradeListBox:addEntry(string.format("  Sold: %d (%s)  |  Bought: %d (%s)  |  Profit: %s",
-                    data.sold or 0, formatMoney(data.earned),
-                    data.bought or 0, formatMoney(data.spent),
-                    formatMoney(profit)), nil)
-            end
-            if not hasData then
-                tradeListBox:addEntry("  (No goods data yet)", nil)
+        -- Populate rows
+        for i, row in ipairs(tradeRows) do
+            if i <= #results.stations then
+                local station = results.stations[i]
+                local profit = station.moneyGained + station.moneyTax - station.moneySpent
+
+                row.nameLabel.caption = station.name or "Unknown"
+                row.sectorLabel.caption = string.format("%d:%d", station.x or 0, station.y or 0)
+                row.revenueLabel.caption = formatMoney(station.moneyGained)
+                row.costsLabel.caption = formatMoney(station.moneySpent)
+                row.profitLabel.caption = formatMoney(profit)
+
+                -- Color-code profit
+                if profit >= 0 then
+                    row.profitLabel.color = ColorRGB(0.3, 1.0, 0.3) -- green
+                else
+                    row.profitLabel.color = ColorRGB(1.0, 0.3, 0.3) -- red
+                end
+
+                row.nameLabel:show()
+                row.sectorLabel:show()
+                row.revenueLabel:show()
+                row.costsLabel:show()
+                row.profitLabel:show()
+                if row.frame then row.frame:show() end
+            else
+                -- Hide unused rows
+                row.nameLabel:hide()
+                row.sectorLabel:hide()
+                row.revenueLabel:hide()
+                row.costsLabel:hide()
+                row.profitLabel:hide()
+                if row.frame then row.frame:hide() end
             end
         end
-    end
 
-    -- Refresh trade data display (initial placeholder before server response)
-    function GclConsole.refreshTradeData()
-        if not tradeListBox then return end
+        -- Update totals
+        local totalRevenue = results.totals.moneyGained or 0
+        local totalCosts = results.totals.moneySpent or 0
+        local totalProfit = totalRevenue + (results.totals.moneyTax or 0) - totalCosts
 
-        tradeListBox:clear()
-        tradeListBox:addEntry("Loading trade data...", nil)
+        if tradeTotalsLabels then
+            tradeTotalsLabels.revenue.caption = formatMoney(totalRevenue)
+            tradeTotalsLabels.costs.caption = formatMoney(totalCosts)
+            tradeTotalsLabels.profit.caption = formatMoney(totalProfit)
 
-        -- Request data from server
-        invokeServerFunction("getTradeStatsForClient")
+            -- Color-code total profit
+            if totalProfit >= 0 then
+                tradeTotalsLabels.profit.color = ColorRGB(0.3, 1.0, 0.3)
+            else
+                tradeTotalsLabels.profit.color = ColorRGB(1.0, 0.3, 0.3)
+            end
+        end
+
+        -- Update status label
+        if tradeStatusLabel then
+            tradeStatusLabel.caption = string.format(
+                "Scanned: %d stations",
+                #results.stations
+            )
+            tradeStatusLabel.color = ColorRGB(0.3, 1.0, 0.3)
+        end
     end
 end -- if onClient()
 
@@ -369,6 +494,9 @@ end -- if onClient()
 if onServer() then
     -- Trade data storage key
     local TRADE_STATS_KEY = "gcl_trade_stats"
+
+    -- Scan interval (5 minutes = 300 seconds)
+    local SCAN_INTERVAL = 300
 
     -- Send output to the client via direct RPC
     -- This is called by commands via player:invokeFunction()
@@ -387,49 +515,207 @@ if onServer() then
 
     callable(GclConsole, "sendOutput")
 
-    -- Initialize trade tracking
+    -- Initialize trade tracking and automatic scanning
     function GclConsole.initialize()
         local player = Player()
         if not player then return end
 
-        -- Register for trading callbacks
+        -- Register for trading callbacks (keep for local sector trades)
         player:registerCallback("onTradingManagerSellToPlayer", "onTradingManagerSellToPlayer")
         player:registerCallback("onTradingManagerBuyFromPlayer", "onTradingManagerBuyFromPlayer")
+
+        -- Check if automatic scanning is enabled (default: on)
+        local enabled = player:getValue("gcl_scantrade_enabled")
+        if enabled == nil then enabled = true end
+
+        if enabled then
+            -- Schedule first scan 5 minutes after login
+            deferredCallback(SCAN_INTERVAL, "performScheduledScan")
+            print("[GCL Console] Automatic trade scanning enabled. First scan in " .. SCAN_INTERVAL .. " seconds.")
+        else
+            print("[GCL Console] Automatic trade scanning disabled.")
+        end
 
         print("[GCL Console] Server-side trade tracking initialized for " .. player.name)
     end
 
-    -- Get current trade stats from player values
+    -- Restart the scan timer (called when user enables scanning via command)
+    function GclConsole.restartScanTimer()
+        local player = Player()
+        if not player then return end
+
+        deferredCallback(SCAN_INTERVAL, "performScheduledScan")
+        print("[GCL Console] Scan timer restarted. Next scan in " .. SCAN_INTERVAL .. " seconds.")
+    end
+
+    callable(GclConsole, "restartScanTimer")
+
+    -- Scheduled scan callback (called by deferredCallback)
+    function performScheduledScan()
+        local player = Player()
+        if not valid(player) then return end
+
+        -- Check if still enabled
+        local enabled = player:getValue("gcl_scantrade_enabled")
+        if enabled == nil then enabled = true end
+
+        if enabled then
+            -- Perform the scan
+            GclConsole.scanAllStations()
+
+            -- Schedule next scan
+            deferredCallback(SCAN_INTERVAL, "performScheduledScan")
+            print("[GCL Console] Scheduled scan complete. Next scan in " .. SCAN_INTERVAL .. " seconds.")
+        else
+            print("[GCL Console] Scheduled scan skipped - scanning disabled.")
+        end
+    end
+
+    -- Scan ALL owned stations across ALL sectors using ShipDatabaseEntry
+    function GclConsole.scanAllStations()
+        local player = Player()
+        if not player then
+            player = Player(callingPlayer)
+        end
+        if not player then return end
+
+        local results = {
+            stations = {},
+            totals = { moneySpent = 0, moneyGained = 0, moneyTax = 0 }
+        }
+
+        -- Collect factions to scan (player and optionally alliance)
+        local factions = { player }
+        if player.alliance then
+            table.insert(factions, player.alliance)
+        end
+
+        for _, faction in pairs(factions) do
+            local shipNames = { faction:getShipNames() }
+            for _, name in pairs(shipNames) do
+                if faction:getShipType(name) == EntityType.Station then
+                    local entry = ShipDatabaseEntry(faction.index, name)
+                    local x, y = entry:getCoordinates()
+                    local secured = entry:getSecuredScriptValues()
+
+                    local stationStats = {
+                        name = name,
+                        x = x,
+                        y = y,
+                        moneySpent = 0,
+                        moneyGained = 0,
+                        moneyTax = 0
+                    }
+
+                    -- Find trading scripts and extract stats
+                    for scriptIndex, values in pairs(secured or {}) do
+                        local stats = nil
+                        -- Check various data structures used by different scripts
+                        if values.tradingData and values.tradingData.stats then
+                            stats = values.tradingData.stats
+                        elseif values.stats then
+                            stats = values.stats
+                        end
+
+                        if stats then
+                            stationStats.moneySpent = stationStats.moneySpent + (stats.moneySpentOnGoods or 0)
+                            stationStats.moneyGained = stationStats.moneyGained + (stats.moneyGainedFromGoods or 0)
+                            stationStats.moneyTax = stationStats.moneyTax + (stats.moneyGainedFromTax or 0)
+                        end
+                    end
+
+                    -- Only include stations with trading activity
+                    if stationStats.moneySpent > 0 or stationStats.moneyGained > 0 then
+                        results.totals.moneySpent = results.totals.moneySpent + stationStats.moneySpent
+                        results.totals.moneyGained = results.totals.moneyGained + stationStats.moneyGained
+                        results.totals.moneyTax = results.totals.moneyTax + stationStats.moneyTax
+                        table.insert(results.stations, stationStats)
+                    end
+                end
+            end
+        end
+
+        print(string.format("[GCL Console] Cross-sector scan: found %d stations with trade data", #results.stations))
+        invokeClientFunction(player, "receiveAllStationsStats", results)
+    end
+
+    callable(GclConsole, "scanAllStations")
+
+    -- Get trade status for client
+    function GclConsole.getTradeStatus()
+        local player = Player()
+        if not player then
+            player = Player(callingPlayer)
+        end
+        if not player then return end
+
+        local enabled = player:getValue("gcl_scantrade_enabled")
+        if enabled == nil then enabled = true end
+
+        -- Count stations (quick count without full scan)
+        local stationCount = 0
+        local factions = { player }
+        if player.alliance then
+            table.insert(factions, player.alliance)
+        end
+
+        for _, faction in pairs(factions) do
+            local shipNames = { faction:getShipNames() }
+            for _, name in pairs(shipNames) do
+                if faction:getShipType(name) == EntityType.Station then
+                    stationCount = stationCount + 1
+                end
+            end
+        end
+
+        invokeClientFunction(player, "receiveTradeStatus", enabled, stationCount)
+    end
+
+    callable(GclConsole, "getTradeStatus")
+
+    -- Get current trade stats from player-specific config file
     function GclConsole.getTradeStats()
         local player = Player()
         if not player then return {} end
 
-        local statsJson = player:getValue(TRADE_STATS_KEY)
-        if not statsJson then
-            -- Initialize empty stats structure
-            return {
-                byStation = {},
-                byGood = {},
-                totals = {
-                    totalRevenue = 0,
-                    totalCost = 0,
-                    totalProfit = 0,
-                    tradeCount = 0
-                }
+        -- Use player name in config file for per-player stats
+        local configName = "gcl_trade_stats_" .. tostring(player.index)
+        local defaults = {
+            byStation = {},
+            byGood = {},
+            stationHistory = {},
+            totals = {
+                totalRevenue = 0,
+                totalCost = 0,
+                totalProfit = 0,
+                tradeCount = 0
             }
-        end
+        }
 
-        -- Parse JSON (simple table for now)
-        -- Note: Avorion stores tables directly, no JSON parsing needed
-        return statsJson
+        -- Load using AzimuthLib - handles Table serialization
+        local stats = Azimuth.loadConfig(configName, defaults)
+
+        -- Ensure all required fields exist (loadConfig may not deep-merge defaults)
+        stats = stats or {}
+        stats.byStation = stats.byStation or {}
+        stats.byGood = stats.byGood or {}
+        stats.stationHistory = stats.stationHistory or {}
+        stats.totals = stats.totals or {}
+        stats.totals.totalRevenue = stats.totals.totalRevenue or 0
+        stats.totals.totalCost = stats.totals.totalCost or 0
+        stats.totals.totalProfit = stats.totals.totalProfit or 0
+        stats.totals.tradeCount = stats.totals.tradeCount or 0
+
+        return stats
     end
 
-    -- Save trade stats to player values
+    -- Save trade stats to player-specific config file
     function GclConsole.saveTradeStats(stats)
         local player = Player()
         if not player then return end
 
-        player:setValue(TRADE_STATS_KEY, stats)
+        local configName = "gcl_trade_stats_" .. tostring(player.index)
+        Azimuth.saveConfig(configName, stats)
     end
 
     -- Record a sale (station sold to player = player revenue when player resells)
@@ -604,9 +890,17 @@ if onServer() then
                     -- Access the trader stats through secure data
                     local ok, data = station:invokeFunction(scriptName, "secure")
 
-                    if ok == 0 and data and data.stats then
-                        local traderStats = data.stats
+                    -- Stats are nested in tradingData (via secureTradingGoods())
+                    local traderStats = nil
+                    if ok == 0 and data then
+                        if data.tradingData and data.tradingData.stats then
+                            traderStats = data.tradingData.stats
+                        elseif data.stats then
+                            traderStats = data.stats
+                        end
+                    end
 
+                    if traderStats then
                         -- Check if we've already imported this station's data
                         local previousImport = stats.stationHistory[stationId]
                         local prevSpent = previousImport and previousImport.moneySpentOnGoods or 0
@@ -658,8 +952,9 @@ if onServer() then
                                 stationName, deltaGained, deltaSpent))
                         end
                     else
-                        print(string.format("[GCL Trade] Could not get stats from %s (script: %s, result: %s)",
-                            stationName, scriptName, tostring(ok)))
+                        print(string.format(
+                            "[GCL Trade] Could not get stats from %s (script: %s, result: %s, has tradingData: %s)",
+                            stationName, scriptName, tostring(ok), tostring(data and data.tradingData ~= nil)))
                     end
                 end
             end
@@ -686,6 +981,103 @@ if onServer() then
     end
 
     callable(GclConsole, "scanAndGetStats")
+
+    -- Attach trade hook scripts to owned stations in the current sector
+    function GclConsole.attachTradeHooks()
+        local player = Player()
+        if not player then return 0 end
+
+        local sector = Sector()
+        if not sector then
+            print("[GCL Trade] No sector available for hook attachment")
+            if player then
+                invokeClientFunction(player, "receiveHookResult", 0, "No sector available")
+            end
+            return 0
+        end
+
+        local playerFactionIndex = player.index
+        local allianceIndex = player.allianceIndex
+
+        -- Get all stations in the sector
+        local stations = { sector:getEntitiesByType(EntityType.Station) }
+        local attachedCount = 0
+
+        for _, station in pairs(stations) do
+            -- Check if player or alliance owns this station
+            local isOwned = station.factionIndex == playerFactionIndex
+            if allianceIndex and station.factionIndex == allianceIndex then
+                isOwned = true
+            end
+
+            if isOwned then
+                local stationName = station.name or "Unknown Station"
+
+                -- Only attach if station has trading capability
+                local hasFactory = station:hasScript("factory.lua")
+                local hasConsumer = station:hasScript("consumer.lua")
+                local hasTradingPost = station:hasScript("tradingpost.lua")
+
+                if hasFactory or hasConsumer or hasTradingPost then
+                    -- addScriptOnce ensures we don't add duplicates
+                    local added = station:addScriptOnce("data/scripts/entity/gcl_trade_hook.lua")
+                    if added then
+                        attachedCount = attachedCount + 1
+                        print(string.format("[GCL Trade] Attached hook to %s", stationName))
+                    else
+                        print(string.format("[GCL Trade] Hook already attached to %s", stationName))
+                    end
+                end
+            end
+        end
+
+        print(string.format("[GCL Trade] Attached hooks to %d stations", attachedCount))
+
+        if player then
+            invokeClientFunction(player, "receiveHookResult", attachedCount, nil)
+        end
+
+        return attachedCount
+    end
+
+    callable(GclConsole, "attachTradeHooks")
+
+    -- Record a station sale (station sold goods = station revenue)
+    function GclConsole.recordStationSale(stationName, goodName, amount, price)
+        GclConsole.recordSale(goodName, amount, price, stationName)
+    end
+
+    callable(GclConsole, "recordStationSale")
+
+    -- Record a station purchase (station bought goods = station expense)
+    function GclConsole.recordStationPurchase(stationName, goodName, amount, price)
+        GclConsole.recordPurchase(goodName, amount, price, stationName)
+    end
+
+    callable(GclConsole, "recordStationPurchase")
+
+    -- Server-side receiver for station trade events (called by gcl_trade_hook.lua)
+    -- This is invoked via player:invokeFunction from the station script
+    function GclConsole.receiveStationTradeEvent(stationName, eventType, goodName, amount, price)
+        print(string.format("[GCL Console Server] Received trade event: %s %s %d %s for %d",
+            stationName, eventType, amount, goodName, price))
+
+        -- Record to stats
+        if eventType == "sell" then
+            GclConsole.recordSale(goodName, amount, price, stationName)
+        else
+            GclConsole.recordPurchase(goodName, amount, price, stationName)
+        end
+
+        -- Forward to client for live UI update
+        local player = Player()
+        if player then
+            invokeClientFunction(player, "receiveStationTradeEvent",
+                stationName, eventType, goodName, amount, price)
+        end
+    end
+
+    callable(GclConsole, "receiveStationTradeEvent")
 end
 
 -- Trading callbacks (must be global for registerCallback)
@@ -713,22 +1105,6 @@ function onClearPressed()
     GclConsole.onClearPressed()
 end
 
-function onGroupByStation()
-    GclConsole.onGroupByStation()
-end
-
-function onGroupByGood()
-    GclConsole.onGroupByGood()
-end
-
-function onTradeRefresh()
-    GclConsole.onTradeRefresh()
-end
-
-function onTradeReset()
-    GclConsole.onTradeReset()
-end
-
-function onScanSector()
-    GclConsole.onScanSector()
+function onScanNow()
+    GclConsole.onScanNow()
 end

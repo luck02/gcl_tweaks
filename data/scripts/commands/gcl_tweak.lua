@@ -29,6 +29,8 @@ function execute(sender, commandName, subcommand, ...)
         return isObjectWrecked(sender)
     elseif subcommand == "setobjectwrecked" then
         return setObjectWrecked(sender, args[1])
+    elseif subcommand == "scantrade" then
+        return setScanTrade(sender, args[1])
     else
         return showHelp()
     end
@@ -39,7 +41,8 @@ function showHelp()
     msg = msg .. "  showdroptables - Print system upgrade drop weights to chat\n"
     msg = msg .. "  setdroprate <component> <multiplier> - Set drop chance multiplier\n"
     msg = msg .. "  isobjectwrecked - Check if selected entity has boarding malus\n"
-    msg = msg .. "  setobjectwrecked 0|1 - Clear or set boarding malus"
+    msg = msg .. "  setobjectwrecked 0|1 - Clear or set boarding malus\n"
+    msg = msg .. "  scantrade [0|1] - Toggle automatic cross-sector trade scanning (default: on)"
     return 1, "", msg
 end
 
@@ -251,6 +254,52 @@ function setObjectWrecked(sender, value)
     end
 end
 
+-- Toggle automatic cross-sector trade scanning
+function setScanTrade(sender, value)
+    local player = Player(sender)
+    if not player then
+        return 1, "", "Player not found"
+    end
+
+    -- Get current state (default is ON)
+    local currentEnabled = player:getValue("gcl_scantrade_enabled")
+    if currentEnabled == nil then currentEnabled = true end
+
+    if value == nil or value == "" then
+        -- No argument: show current status
+        local status = currentEnabled and "ENABLED" or "DISABLED"
+        local msg = string.format("Trade scanning is %s.\nUsage: /gcl_tweak scantrade 0|1 to toggle.", status)
+        return sendToConsole(sender, msg)
+    end
+
+    local numValue = tonumber(value)
+    if numValue == nil then
+        if value == "on" then
+            numValue = 1
+        elseif value == "off" then
+            numValue = 0
+        else
+            return 1, "", "Invalid value. Use 0/off to disable or 1/on to enable."
+        end
+    end
+
+    if numValue == 0 then
+        player:setValue("gcl_scantrade_enabled", false)
+        local msg = "Trade scanning DISABLED.\nAutomatic updates will stop."
+        return sendToConsole(sender, msg)
+    else
+        player:setValue("gcl_scantrade_enabled", true)
+        local msg = "Trade scanning ENABLED.\nNext automatic scan will run in 5 minutes."
+
+        -- Trigger a restart of the polling timer via the console script
+        if player:hasScript("gcl_console.lua") then
+            player:invokeFunction("gcl_console.lua", "restartScanTimer")
+        end
+
+        return sendToConsole(sender, msg)
+    end
+end
+
 function getDescription()
     return "GCL Tweaks - Utility commands for debugging and game state modification"
 end
@@ -263,12 +312,14 @@ Subcommands:
   setdroprate       - Set drop chance multiplier for a specific component
   isobjectwrecked   - Check if selected entity has boarding malus (wrecked)
   setobjectwrecked  - Set/Clear boarding malus
+  scantrade         - Toggle automatic cross-sector trade scanning (default: on)
 
 Examples:
   /gcl_tweak setdroprate civiltcs 0.1
   /gcl_tweak showdroptables
   /gcl_tweak isobjectwrecked
   /gcl_tweak setobjectwrecked 1
+  /gcl_tweak scantrade 0
 ]]
 end
 

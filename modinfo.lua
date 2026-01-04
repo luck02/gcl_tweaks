@@ -17,7 +17,7 @@ meta =
 
     -- Description of your mod that will be displayed to players
     description =
-    "Provides utility commands for debugging and modifying game state.\n\nCommand output appears in a dedicated console window. Press F9 to toggle console visibility.\n\nCommands:\n/gcl_tweak showdroptables - Display system upgrade drop rates (alphabetically sorted)\n/gcl_tweak setdroprate <component> <multiplier> - Adjust drop rates with persistent server-wide multipliers\n/gcl_tweak isobjectwrecked - Check if entity has boarding malus (wrecked)\n/gcl_tweak setobjectwrecked 0|1 - Clear/set boarding malus\n\nExample: /gcl_tweak setdroprate civiltcs.lua 0.1",
+    "Provides utility commands and a Trade Statistics dashboard.\n\nPress F9 to toggle console window with Console and Trade tabs.\n\nTrade Tab: View station profits across all sectors in a spreadsheet layout. Automatic scanning every 5 minutes.\n\nCommands:\n/gcl_tweak showdroptables - Display system upgrade drop rates\n/gcl_tweak setdroprate <component> <multiplier> - Adjust drop rates\n/gcl_tweak isobjectwrecked - Check if entity has boarding malus\n/gcl_tweak setobjectwrecked 0|1 - Clear/set boarding malus\n/gcl_tweak scantrade [0|1] - Toggle automatic trade scanning",
 
     -- Insert all authors into this list
     authors = { "luck2020" },

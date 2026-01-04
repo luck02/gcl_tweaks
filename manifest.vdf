@@ -6,12 +6,18 @@
     "previewfile" "PREVIEWFILE_PLACEHOLDER"
     "visibility" "0"
     "title" "GCL Tweaks"
-    "description" "GCL Tweaks provides utility commands for debugging and modifying game state.
+    "description" "GCL Tweaks provides utility commands and a Trade Statistics dashboard.
+
+Press F9 to toggle console window with Console and Trade tabs.
+
+Trade Tab: View station profits across all sectors in a spreadsheet layout. Automatic scanning every 5 minutes.
 
 Commands:
-/gcl_tweak showdroptables - Print system upgrade drop weights to chat
-/gcl_tweak isobjectwrecked - Check if entity has 'wrecked' (boarding) status
-/gcl_tweak setobjectwrecked 0|1 - Set or clear 'wrecked' status on selected entity
+/gcl_tweak showdroptables - Display system upgrade drop rates
+/gcl_tweak setdroprate <component> <multiplier> - Adjust drop rates
+/gcl_tweak isobjectwrecked - Check if entity has boarding malus
+/gcl_tweak setobjectwrecked 0|1 - Clear/set boarding malus
+/gcl_tweak scantrade [0|1] - Toggle automatic trade scanning
 
 Source code available on GitHub."
     "changenote" "CHANGENOTE_PLACEHOLDER"
