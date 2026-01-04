@@ -10,7 +10,7 @@ All notable changes to GCL Tweaks will be documented in this file.
   - 🟠 IDLE: 0 active production lines (hover for details)
   - 🟡 WARNING: Delivery chain issues
   - 🔴 HALTED: Production error (when sector loaded)
-- Cross-sector detection using `currentProductions` count heuristic
+- Cross-sector detection using currentProductions count heuristic
 - Stations with issues now appear in Trade tab even without trade history
 - Tooltip on status showing specific issue details
 
