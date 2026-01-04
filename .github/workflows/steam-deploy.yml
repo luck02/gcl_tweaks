@@ -86,33 +86,33 @@ jobs:
       - name: Generate Steam Workshop Changelog
         id: steam_changelog
         run: |
-          set -x  # Enable verbose output for entire script
-          # Convert GitHub commit messages to user-friendly Steam changelog
-          CHANGELOG=$(git log --pretty=format:"- %s" -10 HEAD | grep -v "bump version" || true)
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "📋 Extracting changelog for v$VERSION from CHANGELOG.md..."
           
-          # Fallback if no changes after filtering
+          # Extract the section for this version from CHANGELOG.md
+          # Uses awk to get content between ## [VERSION] and the next ## header
+          if [ -f CHANGELOG.md ]; then
+            CHANGELOG=$(awk "/^## \\[$VERSION\\]/{found=1; next} /^## \\[/{found=0} found" CHANGELOG.md | head -20)
+          fi
+          
+          # Fallback to commit messages if no CHANGELOG.md entry
           if [ -z "$CHANGELOG" ]; then
-            CHANGELOG="- Recent improvements and updates"
+            echo "⚠️ No CHANGELOG.md entry for v$VERSION, falling back to git log"
+            CHANGELOG=$(git log --pretty=format:"- %s" -10 HEAD | grep -v "chore:" | grep -v "bump version" || true)
           fi
           
-          # Transform semantic commit messages to user-friendly format
-          STEAM_CHANGELOG=$(echo "$CHANGELOG" | sed -E '
-            s/^- feat(\([^)]*\))?!?: (.+)/Added \2 (breaking change)/
-            s/^- feat(\([^)]*\))?: (.+)/Added \2/
-            s/^- fix(\([^)]*\))?: (.+)/Fixed \2/
-            s/^- docs(\([^)]*\))?: (.+)/Updated documentation/
-            s/^- style(\([^)]*\))?: (.+)/Improved code style/
-            s/^- refactor(\([^)]*\))?: (.+)/Refactored code/
-            s/^- perf(\([^)]*\))?: (.+)/Improved performance/
-            s/^- test(\([^)]*\))?: (.+)/Updated tests/
-            s/^- chore(\([^)]*\))?: (.+)/Maintenance updates/
-            s/^- (.+)/\1/
-          ' | head -5 | tr '\n' '; ' | sed 's/; $//')
-          
-          # Fallback if no changes detected
-          if [ -z "$STEAM_CHANGELOG" ]; then
-            STEAM_CHANGELOG="Various improvements and bug fixes"
+          # Final fallback
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="Various improvements and bug fixes"
           fi
+          
+          # Convert to single-line for Steam (replace newlines with semicolons, trim)
+          STEAM_CHANGELOG=$(echo "$CHANGELOG" | tr '\n' ';' | sed 's/;$//' | sed 's/^;//' | sed 's/;;/;/g' | head -c 500)
+          
+          # Also save multi-line for GitHub release
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo "steam_changelog=$STEAM_CHANGELOG" >> $GITHUB_OUTPUT
           echo "Steam changelog: $STEAM_CHANGELOG"
