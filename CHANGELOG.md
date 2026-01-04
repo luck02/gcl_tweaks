@@ -2,6 +2,18 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
+## [1.4.0] - 2026-01-03
+
+### Added
+- **Economy Health Dashboard** - Status column in Trade tab shows station health
+  - 🟢 OK: Factory actively producing
+  - 🟠 IDLE: 0 active production lines (hover for details)
+  - 🟡 WARNING: Delivery chain issues
+  - 🔴 HALTED: Production error (when sector loaded)
+- Cross-sector detection using `currentProductions` count heuristic
+- Stations with issues now appear in Trade tab even without trade history
+- Tooltip on status showing specific issue details
+
 ## [1.3.0] - 2026-01-03
 
 ### Added

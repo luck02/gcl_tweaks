@@ -121,11 +121,12 @@ if onClient() then
         local tabSize = tab.size
 
         -- Column definitions (x positions and widths)
-        local colStation = { x = 5, w = 220 }   -- Station name
-        local colSector = { x = 230, w = 60 }   -- Sector coords
-        local colRevenue = { x = 295, w = 100 } -- Revenue
-        local colCosts = { x = 400, w = 100 }   -- Costs
-        local colProfit = { x = 505, w = 100 }  -- Profit
+        local colStation = { x = 5, w = 170 }  -- Station name
+        local colStatus = { x = 180, w = 65 }  -- Health status (NEW)
+        local colSector = { x = 250, w = 55 }  -- Sector coords
+        local colRevenue = { x = 310, w = 95 } -- Revenue
+        local colCosts = { x = 410, w = 95 }   -- Costs
+        local colProfit = { x = 510, w = 95 }  -- Profit
 
         local rowHeight = 22
         local headerY = 5
@@ -166,6 +167,8 @@ if onClient() then
 
         tradeHeaderLabels.station = tab:createLabel(
             Rect(colStation.x, headerRowY + 2, colStation.x + colStation.w, headerRowY + rowHeight), "Station", 11)
+        tradeHeaderLabels.status = tab:createLabel(
+            Rect(colStatus.x, headerRowY + 2, colStatus.x + colStatus.w, headerRowY + rowHeight), "Status", 11)
         tradeHeaderLabels.sector = tab:createLabel(
             Rect(colSector.x, headerRowY + 2, colSector.x + colSector.w, headerRowY + rowHeight), "Sector", 11)
         tradeHeaderLabels.revenue = tab:createLabel(
@@ -198,6 +201,8 @@ if onClient() then
 
             row.nameLabel = tradeScrollFrame:createLabel(
                 Rect(colStation.x, y + 2, colStation.x + colStation.w, y + rowHeight), "", 11)
+            row.statusLabel = tradeScrollFrame:createLabel(
+                Rect(colStatus.x, y + 2, colStatus.x + colStatus.w, y + rowHeight), "", 10)
             row.sectorLabel = tradeScrollFrame:createLabel(
                 Rect(colSector.x, y + 2, colSector.x + colSector.w, y + rowHeight), "", 11)
             row.revenueLabel = tradeScrollFrame:createLabel(
@@ -214,6 +219,7 @@ if onClient() then
 
             -- Initially hidden
             row.nameLabel:hide()
+            row.statusLabel:hide()
             row.sectorLabel:hide()
             row.revenueLabel:hide()
             row.costsLabel:hide()
@@ -381,6 +387,7 @@ if onClient() then
         -- Show scanning message in first row
         for i, row in ipairs(tradeRows) do
             row.nameLabel:hide()
+            row.statusLabel:hide()
             row.sectorLabel:hide()
             row.revenueLabel:hide()
             row.costsLabel:hide()
@@ -437,6 +444,29 @@ if onClient() then
                 row.costsLabel.caption = formatMoney(station.moneySpent)
                 row.profitLabel.caption = formatMoney(profit)
 
+                -- Status display with color coding
+                local status = station.status or "HEALTHY"
+                local statusIssue = station.statusIssue or ""
+                if status == "HALTED" then
+                    row.statusLabel.caption = "HALTED"
+                    row.statusLabel.color = ColorRGB(1.0, 0.3, 0.3) -- red
+                elseif status == "IDLE" then
+                    row.statusLabel.caption = "IDLE"
+                    row.statusLabel.color = ColorRGB(1.0, 0.6, 0.2) -- orange
+                elseif status == "WARNING" then
+                    row.statusLabel.caption = "WARNING"
+                    row.statusLabel.color = ColorRGB(1.0, 0.8, 0.2) -- yellow
+                else
+                    row.statusLabel.caption = "OK"
+                    row.statusLabel.color = ColorRGB(0.3, 1.0, 0.3) -- green
+                end
+                -- Add tooltip with issue details if present
+                if statusIssue ~= "" then
+                    row.statusLabel.tooltip = statusIssue
+                else
+                    row.statusLabel.tooltip = nil
+                end
+
                 -- Color-code profit
                 if profit >= 0 then
                     row.profitLabel.color = ColorRGB(0.3, 1.0, 0.3) -- green
@@ -445,6 +475,7 @@ if onClient() then
                 end
 
                 row.nameLabel:show()
+                row.statusLabel:show()
                 row.sectorLabel:show()
                 row.revenueLabel:show()
                 row.costsLabel:show()
@@ -453,6 +484,7 @@ if onClient() then
             else
                 -- Hide unused rows
                 row.nameLabel:hide()
+                row.statusLabel:hide()
                 row.sectorLabel:hide()
                 row.revenueLabel:hide()
                 row.costsLabel:hide()
@@ -604,10 +636,16 @@ if onServer() then
                         y = y,
                         moneySpent = 0,
                         moneyGained = 0,
-                        moneyTax = 0
+                        moneyTax = 0,
+                        status = "HEALTHY",
+                        statusIssue = ""
                     }
 
-                    -- Find trading scripts and extract stats
+                    -- Find trading scripts and extract stats + health status
+                    local hasFactory = false
+                    local maxProductions = 0
+                    local activeProductions = 0
+
                     for scriptIndex, values in pairs(secured or {}) do
                         local stats = nil
                         -- Check various data structures used by different scripts
@@ -622,10 +660,58 @@ if onServer() then
                             stationStats.moneyGained = stationStats.moneyGained + (stats.moneyGainedFromGoods or 0)
                             stationStats.moneyTax = stationStats.moneyTax + (stats.moneyGainedFromTax or 0)
                         end
+
+                        -- Detect factory scripts by checking for production-related fields
+                        if values.maxNumProductions then
+                            hasFactory = true
+                            maxProductions = values.maxNumProductions
+
+                            -- Count active productions
+                            if values.currentProductions then
+                                if type(values.currentProductions) == "table" then
+                                    -- Count non-nil entries in currentProductions
+                                    for _, prod in pairs(values.currentProductions) do
+                                        if prod then
+                                            activeProductions = activeProductions + 1
+                                        end
+                                    end
+                                end
+                            end
+                        end
+
+                        -- Check for delivery chain errors (warnings) from tradingmanager
+                        if stationStats.status ~= "HALTED" then
+                            if values.deliveredStationsErrors then
+                                for _, err in pairs(values.deliveredStationsErrors) do
+                                    if err and err ~= "" then
+                                        stationStats.status = "WARNING"
+                                        stationStats.statusIssue = "Delivery: " .. tostring(err)
+                                        break
+                                    end
+                                end
+                            end
+                            if stationStats.status ~= "WARNING" and values.deliveringStationsErrors then
+                                for _, err in pairs(values.deliveringStationsErrors) do
+                                    if err and err ~= "" then
+                                        stationStats.status = "WARNING"
+                                        stationStats.statusIssue = "Supply: " .. tostring(err)
+                                        break
+                                    end
+                                end
+                            end
+                        end
                     end
 
-                    -- Only include stations with trading activity
-                    if stationStats.moneySpent > 0 or stationStats.moneyGained > 0 then
+                    -- Heuristic: If factory has production capacity but 0 active productions, mark as IDLE
+                    if hasFactory and stationStats.status == "HEALTHY" then
+                        if activeProductions == 0 then
+                            stationStats.status = "IDLE"
+                            stationStats.statusIssue = string.format("0/%d production lines active", maxProductions)
+                        end
+                    end
+
+                    -- Include stations with trading activity OR status issues
+                    if stationStats.moneySpent > 0 or stationStats.moneyGained > 0 or stationStats.status ~= "HEALTHY" then
                         results.totals.moneySpent = results.totals.moneySpent + stationStats.moneySpent
                         results.totals.moneyGained = results.totals.moneyGained + stationStats.moneyGained
                         results.totals.moneyTax = results.totals.moneyTax + stationStats.moneyTax
