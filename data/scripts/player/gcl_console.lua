@@ -54,6 +54,15 @@ GclConsole.MAX_SECTOR_ROWS = 15      -- Maximum visible rows
 GclConsole.SECTOR_COOLDOWN_TIME = 30 -- 30 seconds cooldown for sector scan
 GclConsole.sectorCooldown = 0        -- Remaining sector scan cooldown
 
+-- Fleet tab UI elements (simplified - no leader/follower roles)
+GclConsole.fleetTab = nil
+GclConsole.fleetStatusLabel = nil  -- Shows current state
+GclConsole.fleetDestLabel = nil    -- Shows pending destination
+GclConsole.fleetPendingFrame = nil -- Highlight frame for pending dest
+GclConsole.fleetTimerLabel = nil   -- Countdown timer
+GclConsole.pendingFleetDest = nil  -- {x, y, senderName, timestamp}
+GclConsole.FLEET_DEST_TIMEOUT = 15 -- 15 seconds timeout for pending destinations
+
 -- Include server-side module (includes goods library and all callable functions)
 include("player/gcl_console_server")
 
@@ -63,8 +72,10 @@ if onClient() then
     include("player/gcl_console_ui_console")
     include("player/gcl_console_ui_trade")
     include("player/gcl_console_ui_sector")
+    include("player/gcl_console_ui_fleet")
 
     local TOGGLE_KEY = KeyboardKey.F9
+    local FLEET_KEY = KeyboardKey.F11 -- Broadcasts if no pending dest, accepts if pending
 
     -- Initialize the UI
     function GclConsole.initUI()
@@ -102,6 +113,10 @@ if onClient() then
         GclConsole.sectorTab = GclConsole.tabbedWindow:createTab("Sector", "data/textures/icons/factory-arm.png",
             "In-Sector Diagnostics")
         GclConsole.buildSectorTab(GclConsole.sectorTab)
+
+        GclConsole.fleetTab = GclConsole.tabbedWindow:createTab("Fleet", "data/textures/icons/escort.png",
+            "Fleet Coordination")
+        GclConsole.buildFleetTab(GclConsole.fleetTab)
 
         -- Restore saved tab selection (default to Trade)
         local savedTab = Player():getValue("gcl_console_tab") or "Trade"
@@ -142,6 +157,7 @@ if onClient() then
 
     -- Key debounce state
     local wasKeyDown = false
+    local wasFleetKeyDown = false
     local keyCooldown = 0
     local KEY_COOLDOWN_TIME = 0.3 -- 300ms cooldown between toggles
 
@@ -199,6 +215,27 @@ if onClient() then
             keyCooldown = KEY_COOLDOWN_TIME
         end
         wasKeyDown = isKeyDown
+
+        -- Handle F10: broadcasts if no pending destination, accepts if there is one
+        local isFleetKeyDown = Keyboard():keyPressed(FLEET_KEY)
+        if isFleetKeyDown and not wasFleetKeyDown then
+            GclConsole.handleFleetKey()
+        end
+        wasFleetKeyDown = isFleetKeyDown
+
+        -- Check for fleet destination timeout
+        GclConsole.updateFleetTimeout(timestep)
+    end
+
+    -- F10 handler: dual-purpose key
+    function GclConsole.handleFleetKey()
+        if GclConsole.pendingFleetDest then
+            -- Accept pending destination
+            GclConsole.acceptFleetDestination()
+        else
+            -- Broadcast current galaxy map selection
+            GclConsole.broadcastFleetDestination()
+        end
     end
 
     -- Toggle visibility

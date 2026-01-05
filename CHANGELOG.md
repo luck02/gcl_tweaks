@@ -2,6 +2,16 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
+## [1.6.0] - 2026-01-05
+
+### Added
+- **Fleet Jump Coordination** - New "Fleet" tab for multiplayer destination sync
+  - Press F11 to broadcast your galaxy map selection to all other players
+  - Press F11 again to accept a pending destination (sets your map coordinates)
+  - 15 second timeout for pending destinations
+  - HUD notification when destination is received
+  - No configuration required - just press F11
+
 ## [1.5.0] - 2026-01-04
 
 ### Added

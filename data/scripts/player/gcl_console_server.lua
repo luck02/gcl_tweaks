@@ -768,6 +768,36 @@ if onServer() then
     end
 
     callable(GclConsole, "receiveStationTradeEvent")
+
+    -- =========================================================================
+    -- FLEET COORDINATION - Simplified push-based destination sync
+    -- No roles - F10 broadcasts to all other players or accepts pending
+    -- =========================================================================
+
+    -- Broadcast destination to ALL other online players
+    function GclConsole.broadcastFleetDestinationSimple(x, y)
+        local sender = Player(callingPlayer) or Player()
+        if not sender then return end
+
+        -- Multicast to all OTHER online players
+        local allPlayers = { Server():getOnlinePlayers() }
+        local notified = 0
+
+        for _, recipient in pairs(allPlayers) do
+            -- Don't send to self
+            if recipient.index ~= sender.index then
+                invokeClientFunction(recipient, "receiveFleetDestination", x, y, sender.name)
+                notified = notified + 1
+            end
+        end
+
+        -- Confirm to sender
+        invokeClientFunction(sender, "receiveFleetBroadcastResult", notified, x, y)
+        print(string.format("[GCL Fleet] %s broadcast (%d,%d) to %d player(s)",
+            sender.name, x, y, notified))
+    end
+
+    callable(GclConsole, "broadcastFleetDestinationSimple")
 end
 
 -- Trading callbacks (must be global for registerCallback)
