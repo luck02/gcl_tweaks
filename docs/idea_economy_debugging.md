@@ -1,8 +1,8 @@
 # Avorion Economy Bottleneck Debugging - Feature Idea
 
-> **Status**: IMPLEMENTED (Option A Phase 1 complete)  
+> **Status**: Phase 2 COMPLETE (Sector Tab implemented)  
 > **Created**: 2026-01-03  
-> **Updated**: 2026-01-03  
+> **Updated**: 2026-01-04  
 > **Priority**: Medium  
 
 ## Problem Statement
@@ -48,7 +48,7 @@ Factory.trader.stats.moneyGainedFromGoods
 Factory.trader.stats.moneyGainedFromTax
 
 -- Error States
-newProductionError           -- Current production error string
+newProductionError           -- Current production error string (RUNTIME ONLY - not persisted)
 deliveredStationsErrors[]    -- Errors for "ship to" stations
 deliveringStationsErrors[]   -- Errors for "get from" stations
 ```
@@ -56,54 +56,15 @@ deliveringStationsErrors[]   -- Errors for "get from" stations
 ### Cross-Sector Access Limitation
 
 - `ShipDatabaseEntry:getSecuredScriptValues()` provides financial stats but NOT runtime production state
-- For detailed diagnostics, the sector must be loaded
-
-## Proposed Options
-
-### Option A: "Economy Health Check" Dashboard (Recommended)
-
-Add status indicators to existing Trade tab:
-- 🟢 **Healthy**: Producing normally
-- 🟡 **Warning**: Low inputs OR outputs filling up  
-- 🔴 **Halted**: Production stopped
-
-### Option B: "Alert System" with Notifications
-
-Background monitoring with proactive alerts:
-- "Production stopped at [Station Name]"
-- "Low ingredients at [Station Name]"
-- Alert log with timestamps
-
-### Option C: "Supply Chain Visualizer" (Advanced)
-
-Graph view of production chains:
-- Nodes = Stations, Edges = Links
-- Color-coded by health status
-- Cascade failure detection
-
-## UI Mockup (Option A)
-
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│ GCL Console - Economy Health                                   [X]    │
-├───────────────────────────────────────────────────────────────────────┤
-│  Economy Status: 3 healthy, 1 warning, 2 halted    [Scan Now]         │
-├───────────────────────────────────────────────────────────────────────┤
-│ ●  Station Name        │ Sector │ Status  │ Issue                     │
-├────────────────────────┼────────┼─────────┼───────────────────────────┤
-│ 🔴 Steel Factory       │ 120:-45│ HALTED  │ Missing: Coal (2), Iron   │
-│ 🔴 Ship Factory        │ 120:-45│ HALTED  │ Missing: Steel (waiting)  │
-│ 🟡 Advanced Alloys     │ 10:15  │ WARNING │ Cargo 92% full            │
-│ 🟢 Iron Mine           │ -5:10  │ HEALTHY │ —                         │
-└───────────────────────────────────────────────────────────────────────┘
-```
+- `productionError` is a **local variable** in `factory.lua` - NOT exported by `secure()`
+- For detailed diagnostics, the sector must be loaded and we must query `factory.lua` directly
 
 ## Implementation Phases
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Basic status column in Trade tab | ✅ Complete (v1.4.1) |
-| 2 | Detailed diagnostics when sector is loaded | 🔲 Next |
+| 2 | Dedicated Sector tab with detailed diagnostics | ✅ Complete (v1.5.0) |
 | 3 | Proactive alerts for state transitions | 🔲 Future |
 | 4 | Supply chain visualization | 🔲 Future |
 
@@ -127,39 +88,52 @@ Graph view of production chains:
 ### Limitation Discovered
 `productionError` (the actual error message like "missing ingredients") is NOT persisted to secured values - it's runtime only. Detailed diagnostics require the sector to be loaded.
 
-### Files Modified
-- `data/scripts/player/gcl_console.lua`: `buildTradeTab()`, `receiveAllStationsStats()`, `scanAllStations()`
-
 ---
 
-## Phase 2 Scope: Detailed Diagnostics
+## Phase 2 Implementation Summary (v1.5.0)
 
-**Goal**: When the player visits a sector with IDLE/WARNING stations, provide detailed diagnostics.
-
-### Proposed Features
-1. **In-sector station query**: Use `invokeFunction()` to query `factory.lua` directly when sector is loaded
-2. **Ingredient shortfall details**: Show exactly which ingredients are missing and how many
-3. **Cargo fill percentage**: Detect "output full" scenarios
-4. **Refresh status**: Update status from IDLE → HALTED with actual error message
+### What Was Built
+- **New "Sector" tab** added to GCL Console (3rd tab after Console, Trade)
+- **Dedicated in-sector diagnostics** with 5 columns:
+  - Station | Status | Cargo% | Lines | Missing Ingredients
+- **Scan Sector button** with 30-second cooldown
+- **Missing ingredients display** shows exactly what's lacking (e.g., "Iron Ore (0/5)")
+- **Production lines active** shows "2/4" format
 
 ### Technical Approach
-```lua
--- When player enters sector, query local stations
-local ok, data = station:invokeFunction("factory.lua", "secure")
-if ok and data.productionError then
-    -- Update status with actual error
-end
-```
+Since `productionError` is not available, we **re-derive** the issue by:
+1. Calling `station:invokeFunction("factory.lua", "secure")` on in-sector stations
+2. Getting `production.ingredients` from the recipe
+3. Checking `station:getCargoAmount()` for actual stock levels
+4. Calculating shortfall: `have < need` for non-optional ingredients
+5. Checking `freeCargoSpace / maxCargoSpace` for cargo fill %
 
-### UI Enhancement
-- Click on IDLE station → detailed popup with ingredient breakdown
-- Or: Auto-refresh status for in-sector stations during scan
+### Key Functions
+- `getInSectorDiagnostics()` - Server: Queries all owned factory stations in current sector
+- `receiveSectorDiagnostics()` - Client: Populates Sector tab with detailed info
+- `buildSectorTab()` - Client: Creates the Sector tab UI
+
+### Files Modified
+- `data/scripts/player/gcl_console.lua`
+  - Added Sector tab variables and `buildSectorTab()`
+  - Added `onScanSector()`, `receiveSectorDiagnostics()` 
+  - Added `getInSectorDiagnostics()` server function
+  - Trade tab unchanged (status column from Phase 1 intact)
+
+### What's NOT Available
+- **Last production time**: Factory.lua doesn't store when production last completed
+- **Production cycle ETA**: Could be calculated but would require tracking progress over time
 
 ---
 
-## Open Questions for Phase 2
+## Future Phases
 
-1. **Trigger**: Auto-detect sector entry or manual "Refresh Sector" button?
-2. **UI**: Popup dialog vs. expanded row details vs. tooltip enhancement?
-3. **Caching**: Cache detailed diagnostics or always query fresh?
+### Phase 3: Proactive Alerts
+- Monitor for IDLE→HALTED transitions
+- Notification when production stops
+- Alert log with timestamps
 
+### Phase 4: Supply Chain Visualizer
+- Graph view of production chains
+- Nodes = Stations, Edges = "get from"/"ship to" links
+- Cascade failure detection

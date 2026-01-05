@@ -72,21 +72,46 @@ The repository uses GitHub Actions for automated Steam Workshop deployment.
 ## Critical Modding Guidelines
 
 ### Modifying Library Files (Include Injection)
-When extending vanilla library files (e.g. `upgradegenerator.lua`) that end with a `return` statement:
 
-1.  **Do NOT** perform a full file override (copy-paste) unless absolutely necessary.
-2.  **Use `include()` injection**. Avorion's `include()` mechanism effectively concatenates mod files *before* the `return` statement of the vanilla file.
-3.  **Local Access**: Because your code is injected into the same chunk, you can access `local` variables defined in the vanilla file (like `UpgradeGenerator`).
-4.  **Hook Pattern**:
-    ```lua
-    -- Capture original function
-    local oldInitialize = UpgradeGenerator.initialize
-    -- Redefine with wrapper
-    function UpgradeGenerator:initialize(...)
-        if oldInitialize then oldInitialize(self, ...) end
-        -- Your custom logic here
-    end
-    ```
-5.  **Use `include()`** instead of `require()` ensures correct mod loading behavior.
+**Key Concept**: Avorion's `include()` loads vanilla files first, then **appends** mod files in load order as if they were a single combined file. This allows minimal overrides.
+
+**NEVER copy entire vanilla files** - they will break on game updates. Instead:
+
+1.  **Create a minimal extension file** at the same path in your mod (e.g., `data/scripts/lib/galaxy.lua`)
+2.  Your code is appended after vanilla code runs, so you can capture and override functions
+
+#### Pattern: Override Global Functions
+```lua
+-- Store original function (already defined by vanilla)
+local originalFunction = SomeGlobalFunction
+
+-- Override with your modification
+function SomeGlobalFunction(x, y)
+    local result = originalFunction(x, y)
+    return result + 1  -- Your modification
+end
+
+-- Update table exports if needed
+if SomeTable then
+    SomeTable.SomeFunction = SomeGlobalFunction
+end
+```
+
+#### Pattern: Hook Namespace Methods
+```lua
+-- Capture original method
+local oldInitialize = UpgradeGenerator.initialize
+
+-- Redefine with wrapper
+function UpgradeGenerator:initialize(...)
+    if oldInitialize then oldInitialize(self, ...) end
+    -- Your custom logic here
+end
+```
+
+#### Key Rules
+- **Use `include()`** not `require()` - ensures mods load correctly
+- **Local Access**: Your code runs in same chunk, can access vanilla `local` variables
+- **Minimal files**: Only include the functions you're overriding
 
 Ref: https://avorion.fandom.com/wiki/Writing_your_own_Mod#Using_include()

@@ -2,6 +2,25 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
+## [1.5.0] - 2026-01-04
+
+### Added
+- **Sector Tab** - New "Sector" tab for in-sector station diagnostics
+  - Detailed view of stations in current sector
+  - Cargo fill %, active production lines, missing ingredients
+  - Separate 30-second scan cooldown
+
+### Changed
+- **Code Refactor** - Split gcl_console.lua into modular files for maintainability:
+  - `gcl_console_server.lua` - Server-side trade scanning and data persistence
+  - `gcl_console_ui_console.lua` - Console tab UI
+  - `gcl_console_ui_trade.lua` - Trade tab UI
+  - `gcl_console_ui_sector.lua` - Sector tab UI
+
+### Fixed
+- Fixed console window not appearing (reverted from ScriptUI to Hud API)
+- Fixed missing tab icons (corrected texture paths)
+
 ## [1.4.0] - 2026-01-03
 
 ### Added
