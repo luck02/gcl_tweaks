@@ -132,18 +132,20 @@ jobs:
           echo "Steam build contents:"
           find steam_build -type f | sort
       
-      
       - name: Manual Steam Workshop Deploy
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           CHANGELOG="${{ steps.steam_changelog.outputs.steam_changelog }}"
+          
+          # Escape backticks to prevent shell command substitution
+          CHANGELOG_ESCAPED=$(echo "$CHANGELOG" | sed 's/`/\\`/g')
           
           echo "🚀 Preparing Workshop manifest..."
           # Copy template and replace placeholders
           cp manifest.vdf manifest_deploy.vdf
           sed -i "s|CONTENTFOLDER_PLACEHOLDER|/mod/steam_build|g" manifest_deploy.vdf
           sed -i "s|PREVIEWFILE_PLACEHOLDER|/mod/steam_build/thumb.png|g" manifest_deploy.vdf
-          sed -i "s|CHANGENOTE_PLACEHOLDER|Version v${VERSION}: ${CHANGELOG}|g" manifest_deploy.vdf
+          sed -i "s|CHANGENOTE_PLACEHOLDER|Version v${VERSION}: ${CHANGELOG_ESCAPED}|g" manifest_deploy.vdf
           
           echo "📋 Manifest contents:"
           cat manifest_deploy.vdf
