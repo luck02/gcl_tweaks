@@ -3,6 +3,11 @@
 -- 15 second timeout for pending destinations
 
 if onClient() then
+    -- Activity log storage (in-memory, cleared on reload)
+    GclConsole.fleetActivityLog = {}
+    GclConsole.fleetActivityListBox = nil
+    GclConsole.MAX_FLEET_LOG_ENTRIES = 50
+
     -- Build the simplified Fleet tab UI
     function GclConsole.buildFleetTab(tab)
         local tabSize = tab.size
@@ -70,6 +75,54 @@ if onClient() then
         GclConsole.fleetPendingFrame:hide()
         GclConsole.fleetDestLabel:hide()
         GclConsole.fleetTimerLabel:hide()
+
+        -- Separator before activity log
+        tab:createLine(vec2(padding, y), vec2(tabSize.x - padding, y))
+        y = y + 10
+
+        -- Activity log label
+        tab:createLabel(
+            Rect(padding, y, tabSize.x - padding, y + 20),
+            "Activity Log:",
+            12
+        )
+        y = y + 25
+
+        -- Activity log ListBox
+        local logHeight = tabSize.y - y - padding - 30
+        GclConsole.fleetActivityListBox = tab:createListBox(
+            Rect(padding, y, tabSize.x - padding, y + logHeight)
+        )
+        GclConsole.fleetActivityListBox.fontSize = 11
+
+        -- Populate existing log entries
+        for _, entry in ipairs(GclConsole.fleetActivityLog) do
+            GclConsole.fleetActivityListBox:addEntry(entry)
+        end
+    end
+
+    -- Add entry to the Fleet activity log
+    function GclConsole.addFleetLogEntry(message)
+        -- Get timestamp
+        local timestamp = os.date("%H:%M:%S")
+        local entry = string.format("[%s] %s", timestamp, message)
+
+        -- Add to in-memory log
+        table.insert(GclConsole.fleetActivityLog, entry)
+
+        -- Trim if too long
+        while #GclConsole.fleetActivityLog > GclConsole.MAX_FLEET_LOG_ENTRIES do
+            table.remove(GclConsole.fleetActivityLog, 1)
+        end
+
+        -- Add to ListBox if it exists and is valid
+        if valid(GclConsole.fleetActivityListBox) then
+            -- Clear and repopulate to stay in sync with trimmed log
+            GclConsole.fleetActivityListBox:clear()
+            for _, logEntry in ipairs(GclConsole.fleetActivityLog) do
+                GclConsole.fleetActivityListBox:addEntry(logEntry)
+            end
+        end
     end
 
     -- Broadcast the current galaxy map selection to all players
@@ -77,8 +130,11 @@ if onClient() then
         local x, y = GalaxyMap():getSelectedCoordinates()
         if x and y then
             invokeServerFunction("broadcastFleetDestinationSimple", x, y)
+            -- Log immediately (will be confirmed by server response)
+            GclConsole.addFleetLogEntry(string.format("SENT: Broadcasting (%d, %d)...", x, y))
         else
             displayChatMessage("No sector selected on galaxy map.", "Fleet", 1)
+            GclConsole.addFleetLogEntry("ERROR: No sector selected on galaxy map")
         end
     end
 
@@ -92,11 +148,17 @@ if onClient() then
             if age > GclConsole.FLEET_DEST_TIMEOUT then
                 GclConsole.pendingFleetDest = nil
                 displayChatMessage("Fleet destination expired.", "Fleet", 1)
+                GclConsole.addFleetLogEntry(string.format("EXPIRED: (%d, %d) from %s", dest.x, dest.y,
+                    dest.senderName or "Unknown"))
                 GclConsole.refreshFleetTab()
                 return
             end
 
             GalaxyMap():setSelectedCoordinates(dest.x, dest.y)
+
+            -- Log acceptance
+            GclConsole.addFleetLogEntry(string.format("ACCEPTED: (%d, %d) from %s", dest.x, dest.y,
+                dest.senderName or "Unknown"))
 
             -- Clear pending and show confirmation
             GclConsole.pendingFleetDest = nil
@@ -113,6 +175,9 @@ if onClient() then
         if GclConsole.pendingFleetDest then
             local age = appTime() - GclConsole.pendingFleetDest.timestamp
             if age > GclConsole.FLEET_DEST_TIMEOUT then
+                local dest = GclConsole.pendingFleetDest
+                GclConsole.addFleetLogEntry(string.format("TIMEOUT: (%d, %d) from %s expired", dest.x, dest.y,
+                    dest.senderName or "Unknown"))
                 GclConsole.pendingFleetDest = nil
                 GclConsole.refreshFleetTab()
             else
@@ -178,6 +243,9 @@ if onClient() then
 
     -- Called via RPC when another player broadcasts a destination
     function GclConsole.receiveFleetDestination(x, y, senderName)
+        -- Log received destination
+        GclConsole.addFleetLogEntry(string.format("RECEIVED: (%d, %d) from %s", x, y, senderName))
+
         -- Store pending destination with timestamp
         GclConsole.pendingFleetDest = {
             x = x,
@@ -203,6 +271,9 @@ if onClient() then
 
     -- Called via RPC when server confirms broadcast
     function GclConsole.receiveFleetBroadcastResult(count, x, y)
+        -- Log confirmation
+        GclConsole.addFleetLogEntry(string.format("CONFIRMED: (%d, %d) sent to %d player(s)", x, y, count))
+
         displayChatMessage(
             string.format("Destination (%d, %d) sent to %d player(s)", x, y, count),
             "Fleet", 0

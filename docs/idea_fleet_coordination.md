@@ -1,205 +1,187 @@
-# Fleet Coordination System - Feature Idea
+# Fleet Coordination System
 
-> **Status**: IDEA  
+> **Status**: Phase 1 IMPLEMENTED (v1.6.0), Phase 2 PLANNED  
 > **Created**: 2026-01-03  
-> **Priority**: High  
+> **Updated**: 2026-01-05  
 
-## Problem Statement
+## Implemented Features (v1.6.0)
 
-In multiplayer Avorion, coordinating fleet jumps between two player-operated ships is tedious and error-prone:
+### Fleet Jump Destination Sync ✅
 
-**Current Workflow:**
-1. User A opens galaxy map, marks a sector, clicks "Enter Coordinates Into Navigation Computer"
-2. User A communicates destination to User B (voice/chat)
-3. User B opens galaxy map, finds same sector, enters coordinates
-4. Both players jump individually (timing often mismatched)
+**Keybind**: F11 (dual-purpose)
 
-**Issues:**
-- Manual coordinate transcription is error-prone
-- Timing synchronization is difficult
-- Context switching between map and combat is disruptive
-- No shared awareness of fleet intent
+**How it works:**
+- Press **F11** with no pending destination → broadcasts your galaxy map selection to all players
+- Press **F11** with a pending destination → accepts it (sets your galaxy map coordinates)
+- **15 second timeout** - pending destinations auto-expire
+- **HUD notification** when destination is received
+- No configuration required
 
-## Proposed Features
+**Files:**
+- `gcl_console.lua` - F11 handler, Fleet tab upvalues
+- `gcl_console_ui_fleet.lua` - Fleet tab UI
+- `gcl_console_server.lua` - `broadcastFleetDestinationSimple()` function
 
-### Feature 1: Fleet Jump Destination Sync
+---
 
-**Concept**: When the "leader" ship sets a jump destination, follower ships automatically receive and optionally set the same destination.
+## Phase 2: Combat Target Sharing (PLANNED)
 
-**User Story:**
-> As Player B, I want my ship's navigation computer to automatically receive Player A's selected jump destination so we can jump together without manual coordination.
+### Problem Statement
 
-### Feature 2: Shared Combat Targeting
+In combat, coordinating focus fire between alliance members is difficult:
+- Voice communication introduces delay
+- No visual indicator of what your ally is targeting
+- Manual target selection loses time in fast-paced fights
 
-**Concept**: When the leader ship selects a target, follower ships automatically receive and optionally target the same entity.
+### Proposed Feature: Target Call-Out
 
-**User Story:**
-> As Player B, I want my turrets to automatically target whatever Player A is targeting so we can focus fire effectively.
+**Concept**: Press a key to "call" your current target. Alliance members in the same sector receive a notification and can accept to target the same entity.
 
-## API Research Findings
+### User Story
 
-### Jump Destination APIs
+> As Player B, I want to see what Player A is targeting and quickly select the same target so we can focus fire effectively.
+
+### Technical Design
+
+**Keybind**: F12 (dual-purpose, same pattern as F11)
+- Press **F12** with no pending target → broadcasts your selected target to alliance members in-sector
+- Press **F12** with a pending target → accepts it (attempts to select that entity)
+
+**Key Difference from Jump Sync:**
+- Only works for players in the **same sector** (targets don't exist cross-sector)
+- Only broadcasts to **alliance members** (not all players)
+- Target must still be alive when accepted
+
+### API Research
 
 | API | Context | Purpose |
 |-----|---------|---------|
-| `GalaxyMap().getSelectedCoordinates()` | Client | Get currently selected sector (x, y) |
-| `GalaxyMap().setSelectedCoordinates(x, y)` | Client | Set the selected sector destination |
-| `HyperspaceEngine():jump(x, y)` | Server | Immediately initiate hyperspace jump |
-| `HyperspaceEngine():tryJump(x, y)` | Server | Attempt jump, returns JumpError on failure |
-| `HyperspaceEngine().range` | Both | Current jump range in sectors |
-| `HyperspaceEngine().currentCooldown` | Both | Time until jump drive is ready |
+| `Player().selectedObject` | Client | Currently selected entity |
+| `ControlUnit():getSelectedTargetIds()` | Both | Selected targets from all seats |
+| `Entity(id)` | Both | Get entity by ID |
+| `Entity().translatedTitle` | Both | Display name for notification |
 
-### Target Selection APIs
+**Challenge**: No direct `setSelectedTarget()` API exists.
 
-| API | Context | Purpose |
-|-----|---------|---------|
-| `ControlUnit():getSelectedTargetIds()` | Both | Returns list of selected targets from all seats |
-| `Entity.selectedObject` | Client | Currently selected entity (if any) |
+**Workaround**: Use `GalaxyMap():setSelectedCoordinates()` pattern - we can't force target selection, but we can:
+1. Display HUD notification with target name
+2. Show visual indicator (if possible via sector callbacks)
+3. Player manually clicks to confirm target
 
-### Cross-Player Communication
+### Implementation Plan
 
-The existing `gcl_console.lua` already demonstrates the pattern:
-1. **Server holds shared state**: Leader's destination stored in server-side player values
-2. **Polling or event-driven updates**: Followers query server periodically or on demand
-3. **Client-side RPC**: `invokeClientFunction` to push updates to followers
+#### Server Changes (`gcl_console_server.lua`)
 
-## Technical Feasibility Assessment
-
-### Jump Destination Sync: ✅ **FEASIBLE**
-
-**Approach:**
-1. Leader clicks "Set As Fleet Destination" button (new UI element)
-2. Server stores `{x, y}` in a shared table keyed by playerIndex or alliance
-3. Followers receive RPC with destination, calls `GalaxyMap():setSelectedCoordinates(x, y)`
-4. Optional: Auto-jump when leader jumps (via callback)
-
-**Challenges:**
-- `GalaxyMap` is CLIENT-ONLY - cannot directly set coordinates server-side
-- Need to handle players in different sectors (different hyperspace ranges)
-- Edge case: What if follower can't reach destination (insufficient range)?
-
-**Solution:**
 ```lua
--- Leader broadcasts destination
-invokeClientFunction(followerPlayer, "receiveFleetDestination", x, y)
-
--- Follower receives and sets
-function GclFleet.receiveFleetDestination(x, y)
-    GalaxyMap():setSelectedCoordinates(x, y)
+function GclConsole.broadcastCombatTarget(entityId)
+    local sender = Player(callingPlayer) or Player()
+    if not sender then return end
+    
+    local entity = Entity(entityId)
+    if not entity or not valid(entity) then return end
+    
+    local targetName = entity.translatedTitle or entity.name or "Unknown"
+    
+    -- Only broadcast to alliance members in same sector
+    local allPlayers = {Server():getOnlinePlayers()}
+    local senderSector = {sender:getSectorCoordinates()}
+    local notified = 0
+    
+    for _, recipient in pairs(allPlayers) do
+        if recipient.index ~= sender.index then
+            -- Check same sector
+            local recipientSector = {recipient:getSectorCoordinates()}
+            if recipientSector[1] == senderSector[1] and recipientSector[2] == senderSector[2] then
+                -- Check alliance (same alliance or same player group)
+                if recipient.allianceIndex == sender.allianceIndex then
+                    invokeClientFunction(recipient, "receiveCombatTarget", entityId, targetName, sender.name)
+                    notified = notified + 1
+                end
+            end
+        end
+    end
+    
+    invokeClientFunction(sender, "receiveCombatTargetResult", notified, targetName)
 end
+callable(GclConsole, "broadcastCombatTarget")
 ```
 
-### Shared Combat Targeting: ⚠️ **PARTIALLY FEASIBLE**
-
-**Challenge:** No direct API to SET a player's selected target.
-
-**Findings:**
-- `ControlUnit():getSelectedTargetIds()` only READS targets
-- No `setSelectedTarget()` equivalent exposed in the API
-- Turrets can be controlled via `TurretAI` but this bypasses player selection UI
-
-**Workaround Options:**
-1. **Display-only**: Show leader's target in UI, player manually clicks to target
-2. **Turret override**: Force player's turrets to fire at leader's target (bypasses player control)
-3. **Target suggestion**: Highlight leader's target in sector view
-
-**Recommendation:** Start with display-only; true target sync may require engine changes.
-
-## Proposed Implementation
-
-### Phase 1: Fleet Ops Tab (UI Foundation)
-
-Add a "Fleet" tab to the GCL Console:
-
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│ GCL Console                                                    [X]    │
-├───────────────────────────────────────────────────────────────────────┤
-│  [Console]  [Trade]  [Fleet]                                          │
-├───────────────────────────────────────────────────────────────────────┤
-│  Fleet Role: [●] Leader  [○] Follower                                 │
-│                                                                       │
-│  --- Leader Mode ---                                                  │
-│  Jump Destination: (120, -45)              [Broadcast]                │
-│  Current Target: "Xsotan Destroyer"        [Broadcast Target]         │
-│                                                                       │
-│  --- Followers ---                                                    │
-│  • PlayerB (SteelClaw) - In range ✓                                   │
-│  • PlayerC (Hunter)    - Out of range (needs 2 more sectors)          │
-├───────────────────────────────────────────────────────────────────────┤
-│  [✓] Auto-sync jump destination                                       │
-│  [✓] Show leader's target indicator                                   │
-│  [ ] Auto-jump when leader jumps                                      │
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-### Phase 2: Jump Destination Sync
-
-**Data Flow:**
-```
-Leader Client                Server                    Follower Client
-     │                          │                            │
-     │ "Broadcast Destination"  │                            │
-     ├─────────────────────────►│                            │
-     │                          │ Store {x, y, leaderId}     │
-     │                          ├───────────────────────────►│
-     │                          │ invokeClientFunction       │
-     │                          │                            │
-     │                          │              setSelectedCoordinates(x, y)
-     │                          │                            │
-```
-
-**Implementation Files:**
-- `gcl_console.lua`: Add Fleet tab UI
-- New server function: `broadcastFleetDestination(x, y)`
-- New client function: `receiveFleetDestination(x, y)`
-
-### Phase 3: Target Sharing (Display Only)
-
-- Leader broadcasts target entity ID
-- Followers display an icon/highlight on that entity in sector view
-- Players still manually select target, but have visual guidance
-
-### Phase 4: Auto-Jump (Optional, Advanced)
-
-When leader initiates jump:
-1. Server callback on `onJumpRouteCalculationStarted`
-2. Server notifies all followers
-3. Followers auto-trigger jump (if enabled in settings)
-
-## Configuration Options
+#### Client Changes (`gcl_console_ui_fleet.lua`)
 
 ```lua
-fleetConfig = {
-    role = "follower",           -- "leader" | "follower" | "none"
-    leaderPlayerIndex = nil,     -- Who to follow
-    autoSyncDestination = true,  -- Auto-update nav when leader broadcasts
-    showLeaderTarget = true,     -- Highlight leader's target in sector
-    autoJumpWithLeader = false,  -- Dangerous: auto-jump on leader's command
-}
+GclConsole.pendingCombatTarget = nil  -- {entityId, targetName, senderName, timestamp}
+GclConsole.COMBAT_TARGET_TIMEOUT = 15
+
+function GclConsole.broadcastCombatTarget()
+    local selected = Player().selectedObject
+    if selected and valid(selected) then
+        invokeServerFunction("broadcastCombatTarget", selected.id)
+    else
+        displayChatMessage("No target selected.", "Fleet", 1)
+    end
+end
+
+function GclConsole.acceptCombatTarget()
+    if GclConsole.pendingCombatTarget then
+        local target = GclConsole.pendingCombatTarget
+        local entity = Entity(target.entityId)
+        
+        if entity and valid(entity) then
+            -- Can't programmatically select, but can cycle to it or show indicator
+            displayChatMessage(string.format("Target: %s", target.targetName), "Fleet", 0)
+            -- TODO: Visual indicator implementation
+        else
+            displayChatMessage("Target no longer valid.", "Fleet", 1)
+        end
+        
+        GclConsole.pendingCombatTarget = nil
+    end
+end
+
+function GclConsole.receiveCombatTarget(entityId, targetName, senderName)
+    GclConsole.pendingCombatTarget = {
+        entityId = entityId,
+        targetName = targetName,
+        senderName = senderName,
+        timestamp = appTime()
+    }
+    
+    Hud():displayHint(string.format(
+        "TARGET: %s (from %s)\nPress F12 to focus (15s)",
+        targetName, senderName
+    ))
+    
+    playSound("interface/select", SoundType.UI, 0.5)
+end
+callable(GclConsole, "receiveCombatTarget")
 ```
 
-## Risk Assessment
+### UI Enhancement Ideas
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| No setSelectedTarget API | Confirmed | Medium | Display-only target sharing initially |
-| Players in different sectors | Medium | Low | Only sync when in same sector |
-| Griefing potential (unwanted jumps) | Low | High | Require explicit "follow" consent |
-| Range mismatch | Medium | Low | Show range warning in UI |
+1. **Target indicator in sector view** - Draw an arrow or highlight around the called target
+2. **Fleet tab combat section** - Show currently called target with "Focus" button
+3. **Sound cue** - Different sound for combat call-out vs jump destination
 
-## Open Questions
+### Verification Plan
 
-1. **Scope**: Should this work across alliances, or just within player's own ships/group?
-2. **Persistence**: Should fleet role persist across sessions, or reset on login?
-3. **UI Location**: New tab in GCL Console, or separate Fleet window?
-4. **Target Sync Depth**: Display only, or attempt turret control?
-5. **Auto-jump**: Too dangerous to implement? Require confirmation?
+1. Two players in same sector, same alliance
+2. Player A selects enemy, presses F12
+3. Player B receives HUD notification with target name
+4. Player B presses F12 within 15 seconds
+5. Verify: HUD shows "Target: [name]" confirmation
 
-## Next Steps
+---
 
-1. Implement Fleet tab UI shell
-2. Implement destination broadcast/receive
-3. Test with two players in same sector
-4. Add range validation feedback
-5. Implement target display (optional)
+## Future Ideas
+
+### Phase 3: Visual Target Indicator
+- Use `onPreRenderHud` callback to draw indicator around called target
+- Research: How to draw sector-space elements from player script
+
+### Phase 4: Auto-Jump with Leader
+- When leader initiates jump, followers auto-jump (opt-in only)
+- Dangerous feature - requires explicit consent mechanism
+
+### Phase 5: Formation Flying
+- Maintain relative position to leader ship
+- Likely requires ship AI script, not player script

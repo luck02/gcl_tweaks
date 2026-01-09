@@ -786,8 +786,14 @@ if onServer() then
         for _, recipient in pairs(allPlayers) do
             -- Don't send to self
             if recipient.index ~= sender.index then
-                invokeClientFunction(recipient, "receiveFleetDestination", x, y, sender.name)
-                notified = notified + 1
+                -- Use invokeFunction to ensure correct script context routing
+                -- This calls the server-side stub in gcl_console.lua, which then calls invokeClientFunction
+                local ok = recipient:invokeFunction("gcl_console.lua", "bridgeFleetDestination", x, y, sender.name)
+                if ok == 0 then
+                    notified = notified + 1
+                else
+                    print(string.format("[GCL Fleet] Failed to notify %s: script not found (code %d)", recipient.name, ok))
+                end
             end
         end
 
@@ -798,6 +804,17 @@ if onServer() then
     end
 
     callable(GclConsole, "broadcastFleetDestinationSimple")
+
+    -- Bridge function: receives multicast on server side, forwards to client
+    -- This ensures invokeClientFunction is called within gcl_console's script context
+    function GclConsole.bridgeFleetDestination(x, y, senderName)
+        local player = Player()
+        if player then
+            invokeClientFunction(player, "receiveFleetDestination", x, y, senderName)
+        end
+    end
+
+    callable(GclConsole, "bridgeFleetDestination")
 end
 
 -- Trading callbacks (must be global for registerCallback)
