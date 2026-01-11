@@ -770,51 +770,87 @@ if onServer() then
     callable(GclConsole, "receiveStationTradeEvent")
 
     -- =========================================================================
-    -- FLEET COORDINATION - Simplified push-based destination sync
-    -- No roles - F10 broadcasts to all other players or accepts pending
+    -- TARGET HIGHLIGHTING - Combat target marking for fleet coordination
     -- =========================================================================
 
-    -- Broadcast destination to ALL other online players
-    function GclConsole.broadcastFleetDestinationSimple(x, y)
+    -- Broadcast target highlight to ALL other players in the same sector
+    function GclConsole.broadcastTargetHighlight(targetEntityId)
         local sender = Player(callingPlayer) or Player()
         if not sender then return end
 
-        -- Multicast to all OTHER online players
-        local allPlayers = { Server():getOnlinePlayers() }
+        local sector = Sector()
+        if not sector then return end
+
+        -- Validate target exists
+        local target = sector:getEntity(Uuid(targetEntityId))
+        if not target then
+            print("[GCL Fleet] broadcastTargetHighlight: target not found")
+            return
+        end
+
+        -- Multicast to all OTHER players in sector
+        -- IMPORTANT: Sector():getPlayers() only returns players in THIS sector,
+        -- preventing cross-sector broadcasts. Players in other sectors won't receive this.
+        local players = { sector:getPlayers() }
         local notified = 0
 
-        for _, recipient in pairs(allPlayers) do
-            -- Don't send to self
+        for _, recipient in pairs(players) do
             if recipient.index ~= sender.index then
-                -- Use invokeFunction to ensure correct script context routing
-                -- This calls the server-side stub in gcl_console.lua, which then calls invokeClientFunction
-                local ok = recipient:invokeFunction("gcl_console.lua", "bridgeFleetDestination", x, y, sender.name)
+                local ok = recipient:invokeFunction("gcl_console.lua",
+                    "bridgeTargetHighlight", targetEntityId, sender.name)
                 if ok == 0 then
                     notified = notified + 1
-                else
-                    print(string.format("[GCL Fleet] Failed to notify %s: script not found (code %d)", recipient.name, ok))
                 end
             end
         end
 
         -- Confirm to sender
-        invokeClientFunction(sender, "receiveFleetBroadcastResult", notified, x, y)
-        print(string.format("[GCL Fleet] %s broadcast (%d,%d) to %d player(s)",
-            sender.name, x, y, notified))
+        invokeClientFunction(sender, "onTargetBroadcastConfirmed", target.name or "Unknown", notified)
+
+        print(string.format("[GCL Fleet] %s highlighted target %s to %d player(s)",
+            sender.name, target.name or "Unknown", notified))
     end
 
-    callable(GclConsole, "broadcastFleetDestinationSimple")
+    callable(GclConsole, "broadcastTargetHighlight")
 
     -- Bridge function: receives multicast on server side, forwards to client
-    -- This ensures invokeClientFunction is called within gcl_console's script context
-    function GclConsole.bridgeFleetDestination(x, y, senderName)
+    function GclConsole.bridgeTargetHighlight(targetEntityId, senderName)
         local player = Player()
         if player then
-            invokeClientFunction(player, "receiveFleetDestination", x, y, senderName)
+            invokeClientFunction(player, "receiveTargetHighlight", targetEntityId, senderName)
         end
     end
 
-    callable(GclConsole, "bridgeFleetDestination")
+    callable(GclConsole, "bridgeTargetHighlight")
+
+    -- DEV: Spawn a test target highlight on self for single-player testing
+    function GclConsole.devSpawnTestTarget()
+        local player = Player(callingPlayer) or Player()
+        if not player then return end
+
+        local sector = Sector()
+        if not sector then return end
+
+        -- Find any entity in sector to use as test target
+        local entities = { sector:getEntities() }
+        local testTarget = nil
+        for _, entity in pairs(entities) do
+            if entity.type == EntityType.Ship or entity.type == EntityType.Station then
+                testTarget = entity
+                break
+            end
+        end
+
+        if testTarget then
+            -- Send to self as if another player marked it
+            invokeClientFunction(player, "receiveTargetHighlight", testTarget.id.string, "DEV_TEST")
+            print(string.format("[GCL Fleet DEV] Sent test target %s to %s", testTarget.name or "Unknown", player.name))
+        else
+            print("[GCL Fleet DEV] No suitable test target found in sector")
+        end
+    end
+
+    callable(GclConsole, "devSpawnTestTarget")
 end
 
 -- Trading callbacks (must be global for registerCallback)

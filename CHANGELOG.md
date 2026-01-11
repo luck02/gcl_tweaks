@@ -2,6 +2,28 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
+## [1.7.1] - 2026-01-11
+
+### Fixed
+- **TEST button visibility** - Fixed environment detection that was incorrectly hiding the TEST button in local mod installs (was using Workshop ID instead of folder name)
+- Added clarifying comments for sector-scoped target highlighting behavior
+
+## [1.7.0] - 2026-01-11
+
+### Added
+- **Target Highlighting** - Fleet Tab now offers in-sector target marking
+  - Press **G** to highlight your current target for all players in sector
+  - Large, bold, flashing directional arrow points to marked targets
+  - Pulsing target bracket and indicator on the highlighted entity
+  - Configurable highlight settings: duration, color, pulse speed, sound
+  - Show/receive toggle for target highlights
+  - Activity log tracks sent/received target marks
+
+### Changed
+- Replaced F11 keybind with **G** for Mark Target (easier mid-combat access)
+- Improved directional arrow: 40-60px width, 80-120px length, fast flash effect
+- TEST button now only visible in local/development mod installs
+
 ## [1.6.0] - 2026-01-05
 
 ### Added

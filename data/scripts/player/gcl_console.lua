@@ -54,14 +54,74 @@ GclConsole.MAX_SECTOR_ROWS = 15      -- Maximum visible rows
 GclConsole.SECTOR_COOLDOWN_TIME = 30 -- 30 seconds cooldown for sector scan
 GclConsole.sectorCooldown = 0        -- Remaining sector scan cooldown
 
--- Fleet tab UI elements (simplified - no leader/follower roles)
+-- Fleet tab UI elements
 GclConsole.fleetTab = nil
-GclConsole.fleetStatusLabel = nil  -- Shows current state
-GclConsole.fleetDestLabel = nil    -- Shows pending destination
-GclConsole.fleetPendingFrame = nil -- Highlight frame for pending dest
-GclConsole.fleetTimerLabel = nil   -- Countdown timer
-GclConsole.pendingFleetDest = nil  -- {x, y, senderName, timestamp}
-GclConsole.FLEET_DEST_TIMEOUT = 15 -- 15 seconds timeout for pending destinations
+
+-- Fleet highlighting configuration (persisted via AzimuthLib)
+GclConsole.config = {
+    fleet = {
+        highlightDuration = 10,                     -- seconds (5-30)
+        highlightColor = { r = 1, g = 0.5, b = 0 }, -- orange
+        pulseSpeed = "normal",                      -- "slow", "normal", "fast"
+        showArrow = true,
+        playSound = true
+    }
+}
+
+-- Available color presets for highlighting
+GclConsole.HIGHLIGHT_COLORS = {
+    { name = "Orange", color = { r = 1, g = 0.5, b = 0 } },
+    { name = "Red",    color = { r = 1, g = 0.2, b = 0.2 } },
+    { name = "Yellow", color = { r = 1, g = 1, b = 0 } },
+    { name = "Green",  color = { r = 0.2, g = 1, b = 0.2 } },
+    { name = "Cyan",   color = { r = 0, g = 1, b = 1 } },
+    { name = "Purple", color = { r = 0.8, g = 0.2, b = 1 } },
+}
+
+-- Pulse speed multipliers
+GclConsole.PULSE_SPEEDS = {
+    slow = 0.5,
+    normal = 1.0,
+    fast = 2.0
+}
+
+-- Load fleet config from AzimuthLib
+function GclConsole.loadFleetConfig()
+    local ok, duration = Azimuth.getConfig("GclTweaks", "fleetHighlightDuration")
+    if ok and duration then GclConsole.config.fleet.highlightDuration = duration end
+
+    local ok2, colorR = Azimuth.getConfig("GclTweaks", "fleetColorR")
+    local ok3, colorG = Azimuth.getConfig("GclTweaks", "fleetColorG")
+    local ok4, colorB = Azimuth.getConfig("GclTweaks", "fleetColorB")
+    if ok2 and ok3 and ok4 then
+        GclConsole.config.fleet.highlightColor = { r = colorR, g = colorG, b = colorB }
+    end
+
+    local ok5, pulseSpeed = Azimuth.getConfig("GclTweaks", "fleetPulseSpeed")
+    if ok5 and pulseSpeed then GclConsole.config.fleet.pulseSpeed = pulseSpeed end
+
+    local ok6, showArrow = Azimuth.getConfig("GclTweaks", "fleetShowArrow")
+    if ok6 ~= nil then GclConsole.config.fleet.showArrow = showArrow end
+
+    local ok7, playSound = Azimuth.getConfig("GclTweaks", "fleetPlaySound")
+    if ok7 ~= nil then GclConsole.config.fleet.playSound = playSound end
+
+    print("[GCL Fleet] Config loaded: duration=" .. GclConsole.config.fleet.highlightDuration ..
+        ", pulse=" .. GclConsole.config.fleet.pulseSpeed)
+end
+
+-- Save fleet config to AzimuthLib
+function GclConsole.saveFleetConfig()
+    local cfg = GclConsole.config.fleet
+    Azimuth.setConfig("GclTweaks", "fleetHighlightDuration", cfg.highlightDuration)
+    Azimuth.setConfig("GclTweaks", "fleetColorR", cfg.highlightColor.r)
+    Azimuth.setConfig("GclTweaks", "fleetColorG", cfg.highlightColor.g)
+    Azimuth.setConfig("GclTweaks", "fleetColorB", cfg.highlightColor.b)
+    Azimuth.setConfig("GclTweaks", "fleetPulseSpeed", cfg.pulseSpeed)
+    Azimuth.setConfig("GclTweaks", "fleetShowArrow", cfg.showArrow)
+    Azimuth.setConfig("GclTweaks", "fleetPlaySound", cfg.playSound)
+    print("[GCL Fleet] Config saved")
+end
 
 -- Include server-side module (includes goods library and all callable functions)
 include("player/gcl_console_server")
@@ -73,9 +133,9 @@ if onClient() then
     include("player/gcl_console_ui_trade")
     include("player/gcl_console_ui_sector")
     include("player/gcl_console_ui_fleet")
+    include("player/gcl_console_ui_targeting")
 
     local TOGGLE_KEY = KeyboardKey.F9
-    local FLEET_KEY = KeyboardKey.F11 -- Broadcasts if no pending dest, accepts if pending
 
     -- Initialize the UI
     function GclConsole.initUI()
@@ -150,19 +210,36 @@ if onClient() then
     end
 
     function GclConsole.initialize()
+        -- Load saved fleet configuration
+        GclConsole.loadFleetConfig()
+
         -- Don't call initUI here - createWindow API isn't available yet
         -- UI will be created lazily on F9 press or when output is received
         print("[GCL Console] Client script initialized. Press F9 to open console.")
+
+        -- Register targeting render callback directly in main script
+        -- (Callbacks registered from included modules may not be found by the engine)
+        Player():registerCallback("onPostRenderIndicators", "onPostRenderIndicators")
+        print("[GCL Fleet] Target highlighting initialized")
     end
 
     -- Key debounce state
     local wasKeyDown = false
-    local wasFleetKeyDown = false
     local keyCooldown = 0
     local KEY_COOLDOWN_TIME = 0.3 -- 300ms cooldown between toggles
 
+    -- Mark Target key (G) debounce state
+    local wasMarkKeyDown = false
+    local markKeyCooldown = 0
+    local MARK_TARGET_KEY = KeyboardKey._G
+
     -- Called every frame on client
     function GclConsole.updateClient(timestep)
+        -- Render target highlighting (callback not firing, so call directly)
+        if GclConsole.renderTargetIndicator_impl then
+            GclConsole.renderTargetIndicator_impl()
+        end
+
         -- Update key cooldown
         if keyCooldown > 0 then
             keyCooldown = keyCooldown - timestep
@@ -216,26 +293,16 @@ if onClient() then
         end
         wasKeyDown = isKeyDown
 
-        -- Handle F10: broadcasts if no pending destination, accepts if there is one
-        local isFleetKeyDown = Keyboard():keyPressed(FLEET_KEY)
-        if isFleetKeyDown and not wasFleetKeyDown then
-            GclConsole.handleFleetKey()
+        -- Handle G key for Mark Target with debounce
+        if markKeyCooldown > 0 then
+            markKeyCooldown = markKeyCooldown - timestep
         end
-        wasFleetKeyDown = isFleetKeyDown
-
-        -- Check for fleet destination timeout
-        GclConsole.updateFleetTimeout(timestep)
-    end
-
-    -- F10 handler: dual-purpose key
-    function GclConsole.handleFleetKey()
-        if GclConsole.pendingFleetDest then
-            -- Accept pending destination
-            GclConsole.acceptFleetDestination()
-        else
-            -- Broadcast current galaxy map selection
-            GclConsole.broadcastFleetDestination()
+        local isMarkKeyDown = Keyboard():keyPressed(MARK_TARGET_KEY)
+        if isMarkKeyDown and not wasMarkKeyDown and markKeyCooldown <= 0 then
+            GclConsole.onFleetMarkTargetPressed()
+            markKeyCooldown = KEY_COOLDOWN_TIME
         end
+        wasMarkKeyDown = isMarkKeyDown
     end
 
     -- Toggle visibility
@@ -274,4 +341,56 @@ end
 
 function onScanSector()
     GclConsole.onScanSector()
+end
+
+function onTargetMarkingToggled(checkBox)
+    GclConsole.onTargetMarkingToggled(checkBox)
+end
+
+function onFleetMarkTargetPressed()
+    GclConsole.onFleetMarkTargetPressed()
+end
+
+function onSpawnTestTargetPressed()
+    GclConsole.onSpawnTestTargetPressed()
+end
+
+function onDurationSliderChanged(slider)
+    GclConsole.onDurationSliderChanged(slider)
+end
+
+function onPulseSpeedChanged(comboBox)
+    GclConsole.onPulseSpeedChanged(comboBox)
+end
+
+function onShowArrowChanged(checkBox)
+    GclConsole.onShowArrowChanged(checkBox)
+end
+
+function onPlaySoundChanged(checkBox)
+    GclConsole.onPlaySoundChanged(checkBox)
+end
+
+function onColorButtonPressed(button)
+    GclConsole.onColorButtonPressed(button)
+end
+
+-- Global engine callbacks (Avorion calls these, not namespace-qualified versions)
+function initialize()
+    if onClient() then
+        GclConsole.initialize()
+    elseif onServer() then
+        GclConsole.initialize()
+    end
+end
+
+function updateClient(timestep)
+    GclConsole.updateClient(timestep)
+end
+
+-- Global render callback (Avorion looks for this in the script's global namespace)
+function onPostRenderIndicators()
+    if GclConsole.renderTargetIndicator_impl then
+        GclConsole.renderTargetIndicator_impl()
+    end
 end

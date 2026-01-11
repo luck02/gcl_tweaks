@@ -1,6 +1,5 @@
--- GCL Console Fleet Tab - Simplified destination sync
--- Press F11 to broadcast (if no pending) or accept (if pending)
--- 15 second timeout for pending destinations
+-- GCL Console Fleet Tab - Target Highlighting for combat coordination
+-- Mark targets for teammates to see highlighted in the HUD
 
 if onClient() then
     -- Activity log storage (in-memory, cleared on reload)
@@ -8,73 +7,132 @@ if onClient() then
     GclConsole.fleetActivityListBox = nil
     GclConsole.MAX_FLEET_LOG_ENTRIES = 50
 
-    -- Build the simplified Fleet tab UI
+    -- Check if running as local mod (not from Workshop subscription)
+    -- Local mods have non-numeric IDs (folder name), Workshop mods have numeric Steam IDs
+    local function isLocalMod()
+        -- Use the LOCAL folder name "gcl_tweaks" (contains letters = local)
+        -- Workshop installs use numeric ID "3628589261" (pure digits = workshop)
+        local modId = "gcl_tweaks"
+        -- If ID is purely numeric, it's a Workshop subscription
+        -- If it contains letters, it's a local/development mod
+        return not modId:match("^%d+$")
+    end
+
+    -- Build the Fleet tab UI
     function GclConsole.buildFleetTab(tab)
         local tabSize = tab.size
         local padding = 15
         local y = padding
 
-        -- Title / instruction
+        -- Title
         local titleLabel = tab:createLabel(
             Rect(padding, y, tabSize.x - padding, y + 30),
-            "Fleet Jump Coordination",
+            "Target Marking",
             16
         )
-        y = y + 40
+        y = y + 35
 
-        -- Instructions
-        local instructLabel = tab:createLabel(
+        -- Enable/Disable toggle for receiving target marks
+        GclConsole.targetMarkingToggle = tab:createCheckBox(
             Rect(padding, y, tabSize.x - padding, y + 20),
-            "Press F11: Broadcasts your map selection, or accepts a pending destination",
-            12
+            "Receive Target Highlights",
+            "onTargetMarkingToggled"
         )
-        y = y + 35
+        -- Initialize if not yet set (targeting module may not be loaded yet)
+        if GclConsole.targetMarkingEnabled == nil then
+            GclConsole.targetMarkingEnabled = true
+        end
+        GclConsole.targetMarkingToggle.checked = GclConsole.targetMarkingEnabled
+        y = y + 30
 
-        -- Horizontal separator
+        -- Mark Target button
+        local markTargetBtn = tab:createButton(
+            Rect(padding, y, padding + 180, y + 30),
+            "Mark Target (G)",
+            "onFleetMarkTargetPressed"
+        )
+        markTargetBtn.tooltip = "Highlight your current target for all players in sector"
+
+        -- TEST button (small, on the right side) - only for local/dev mods
+        if isLocalMod() then
+            local testBtn = tab:createButton(
+                Rect(tabSize.x - padding - 60, y, tabSize.x - padding, y + 35),
+                "TEST",
+                "onSpawnTestTargetPressed"
+            )
+            testBtn.tooltip = "Test: highlights a random entity in sector"
+        end
+        y = y + 45
+
+        -- Settings separator
         tab:createLine(vec2(padding, y), vec2(tabSize.x - padding, y))
-        y = y + 15
+        y = y + 10
+        tab:createLabel(Rect(padding, y, tabSize.x - padding, y + 20), "Highlight Settings:", 14)
+        y = y + 25
 
-        -- Status label
-        GclConsole.fleetStatusLabel = tab:createLabel(
-            Rect(padding, y, tabSize.x - padding, y + 25),
-            "Status: Ready to broadcast",
-            13
+        -- Duration slider (5-30 seconds)
+        tab:createLabel(Rect(padding, y, padding + 80, y + 20), "Duration:", 12)
+        GclConsole.durationSlider = tab:createSlider(
+            Rect(padding + 85, y - 2, padding + 250, y + 22),
+            5, 30, 25, "", "onDurationSliderChanged"
         )
+        GclConsole.durationSlider.value = GclConsole.config.fleet.highlightDuration
+        GclConsole.durationLabel = tab:createLabel(
+            Rect(padding + 260, y, padding + 310, y + 20),
+            string.format("%ds", GclConsole.config.fleet.highlightDuration), 12
+        )
+        y = y + 28
+
+        -- Pulse speed dropdown
+        tab:createLabel(Rect(padding, y, padding + 80, y + 20), "Pulse Speed:", 12)
+        GclConsole.pulseSpeedCombo = tab:createComboBox(
+            Rect(padding + 85, y - 2, padding + 200, y + 22),
+            "onPulseSpeedChanged"
+        )
+        GclConsole.pulseSpeedCombo:addEntry("Slow")
+        GclConsole.pulseSpeedCombo:addEntry("Normal")
+        GclConsole.pulseSpeedCombo:addEntry("Fast")
+        -- Select current setting
+        local speedIdx = ({ slow = 0, normal = 1, fast = 2 })[GclConsole.config.fleet.pulseSpeed] or 1
+        GclConsole.pulseSpeedCombo:setSelectedIndexNoCallback(speedIdx)
+        y = y + 28
+
+        -- Show arrow checkbox
+        GclConsole.showArrowCheckbox = tab:createCheckBox(
+            Rect(padding, y, padding + 150, y + 20),
+            "Show Arrow",
+            "onShowArrowChanged"
+        )
+        GclConsole.showArrowCheckbox.checked = GclConsole.config.fleet.showArrow
+
+        -- Play sound checkbox
+        GclConsole.playSoundCheckbox = tab:createCheckBox(
+            Rect(padding + 160, y, padding + 310, y + 20),
+            "Play Sound",
+            "onPlaySoundChanged"
+        )
+        GclConsole.playSoundCheckbox.checked = GclConsole.config.fleet.playSound
+        y = y + 28
+
+        -- Color selection label
+        tab:createLabel(Rect(padding, y, padding + 80, y + 20), "Color:", 12)
+        y = y + 22
+
+        -- Color selection using buttons (Selection/ColorSelectionItem complex, use simple buttons)
+        local colorBtnWidth = 45
+        local colorX = padding
+        for i, colorEntry in ipairs(GclConsole.HIGHLIGHT_COLORS) do
+            local btn = tab:createButton(
+                Rect(colorX, y, colorX + colorBtnWidth, y + 25),
+                colorEntry.name:sub(1, 3), -- Short name: "Ora", "Red", etc.
+                "onColorButtonPressed"
+            )
+            btn.backgroundColor = ColorRGB(colorEntry.color.r, colorEntry.color.g, colorEntry.color.b)
+            btn.tooltip = colorEntry.name
+            -- Store color index in button tag (not supported, use workaround)
+            colorX = colorX + colorBtnWidth + 5
+        end
         y = y + 35
-
-        -- Pending destination frame (visible when destination is pending)
-        GclConsole.fleetPendingFrame = tab:createFrame(
-            Rect(padding, y, tabSize.x - padding, y + 80)
-        )
-        GclConsole.fleetPendingFrame.backgroundColor = ColorARGB(0.4, 0.2, 0.6, 0.2)
-
-        -- Pending destination label (inside frame)
-        GclConsole.fleetDestLabel = tab:createLabel(
-            Rect(padding + 10, y + 10, tabSize.x - padding - 10, y + 35),
-            "",
-            14
-        )
-
-        -- Timer label
-        GclConsole.fleetTimerLabel = tab:createLabel(
-            Rect(padding + 10, y + 40, tabSize.x - padding - 10, y + 60),
-            "",
-            12
-        )
-
-        -- Accept hint
-        local acceptHint = tab:createLabel(
-            Rect(padding + 10, y + 60, tabSize.x - padding - 10, y + 75),
-            "Press F11 to accept",
-            11
-        )
-
-        y = y + 90
-
-        -- Initially hide pending frame
-        GclConsole.fleetPendingFrame:hide()
-        GclConsole.fleetDestLabel:hide()
-        GclConsole.fleetTimerLabel:hide()
 
         -- Separator before activity log
         tab:createLine(vec2(padding, y), vec2(tabSize.x - padding, y))
@@ -88,8 +146,8 @@ if onClient() then
         )
         y = y + 25
 
-        -- Activity log ListBox
-        local logHeight = tabSize.y - y - padding - 30
+        -- Activity log ListBox (remaining space)
+        local logHeight = tabSize.y - y - padding - 10
         GclConsole.fleetActivityListBox = tab:createListBox(
             Rect(padding, y, tabSize.x - padding, y + logHeight)
         )
@@ -99,6 +157,45 @@ if onClient() then
         for _, entry in ipairs(GclConsole.fleetActivityLog) do
             GclConsole.fleetActivityListBox:addEntry(entry)
         end
+    end
+
+    -- Target marking toggle handler
+    function GclConsole.onTargetMarkingToggled(checkBox)
+        GclConsole.targetMarkingEnabled = checkBox.checked
+        if GclConsole.targetMarkingEnabled then
+            displayChatMessage("Target marking enabled", "Fleet", 0)
+        else
+            displayChatMessage("Target marking disabled", "Fleet", 0)
+            GclConsole.clearTargetHighlight() -- Clear any active highlight
+        end
+    end
+
+    -- Mark Target button handler
+    function GclConsole.onFleetMarkTargetPressed()
+        local player = Player()
+        if not player then return end
+
+        local craft = player.craft
+        if not craft then
+            displayChatMessage("No ship controlled", "Fleet", 1)
+            return
+        end
+
+        local target = craft.selectedObject
+        if not target or not valid(target) then
+            displayChatMessage("No target selected. Select a target first (Tab key).", "Fleet", 1)
+            return
+        end
+
+        invokeServerFunction("broadcastTargetHighlight", target.id.string)
+        displayChatMessage(string.format("Marked target: %s", target.name or "Unknown"), "Fleet", 0)
+        GclConsole.addFleetLogEntry(string.format("SENT: Marked %s", target.name or "Unknown"))
+    end
+
+    -- DEV: Spawn Test Target button handler
+    function GclConsole.onSpawnTestTargetPressed()
+        invokeServerFunction("devSpawnTestTarget")
+        GclConsole.addFleetLogEntry("DEBUG: Requesting test target from server...")
     end
 
     -- Add entry to the Fleet activity log
@@ -125,160 +222,48 @@ if onClient() then
         end
     end
 
-    -- Broadcast the current galaxy map selection to all players
-    function GclConsole.broadcastFleetDestination()
-        local x, y = GalaxyMap():getSelectedCoordinates()
-        if x and y then
-            invokeServerFunction("broadcastFleetDestinationSimple", x, y)
-            -- Log immediately (will be confirmed by server response)
-            GclConsole.addFleetLogEntry(string.format("SENT: Broadcasting (%d, %d)...", x, y))
-        else
-            displayChatMessage("No sector selected on galaxy map.", "Fleet", 1)
-            GclConsole.addFleetLogEntry("ERROR: No sector selected on galaxy map")
+    -- Settings callback: Duration slider changed
+    function GclConsole.onDurationSliderChanged(slider)
+        local val = math.floor(slider.value + 0.5)
+        GclConsole.config.fleet.highlightDuration = val
+        if GclConsole.durationLabel then
+            GclConsole.durationLabel.caption = string.format("%ds", val)
         end
+        GclConsole.saveFleetConfig()
     end
 
-    -- Accept pending destination
-    function GclConsole.acceptFleetDestination()
-        if GclConsole.pendingFleetDest then
-            local dest = GclConsole.pendingFleetDest
-
-            -- Check for timeout
-            local age = appTime() - dest.timestamp
-            if age > GclConsole.FLEET_DEST_TIMEOUT then
-                GclConsole.pendingFleetDest = nil
-                displayChatMessage("Fleet destination expired.", "Fleet", 1)
-                GclConsole.addFleetLogEntry(string.format("EXPIRED: (%d, %d) from %s", dest.x, dest.y,
-                    dest.senderName or "Unknown"))
-                GclConsole.refreshFleetTab()
-                return
-            end
-
-            GalaxyMap():setSelectedCoordinates(dest.x, dest.y)
-
-            -- Log acceptance
-            GclConsole.addFleetLogEntry(string.format("ACCEPTED: (%d, %d) from %s", dest.x, dest.y,
-                dest.senderName or "Unknown"))
-
-            -- Clear pending and show confirmation
-            GclConsole.pendingFleetDest = nil
-            displayChatMessage(
-                string.format("Destination accepted: (%d, %d)", dest.x, dest.y),
-                "Fleet", 0
-            )
-            GclConsole.refreshFleetTab()
-        end
+    -- Settings callback: Pulse speed dropdown changed
+    function GclConsole.onPulseSpeedChanged(comboBox)
+        local idx = comboBox.selectedIndex
+        local speeds = { "slow", "normal", "fast" }
+        GclConsole.config.fleet.pulseSpeed = speeds[idx + 1] or "normal"
+        GclConsole.saveFleetConfig()
     end
 
-    -- Check for timeout (called from updateClient)
-    function GclConsole.updateFleetTimeout(timestep)
-        if GclConsole.pendingFleetDest then
-            local age = appTime() - GclConsole.pendingFleetDest.timestamp
-            if age > GclConsole.FLEET_DEST_TIMEOUT then
-                local dest = GclConsole.pendingFleetDest
-                GclConsole.addFleetLogEntry(string.format("TIMEOUT: (%d, %d) from %s expired", dest.x, dest.y,
-                    dest.senderName or "Unknown"))
-                GclConsole.pendingFleetDest = nil
-                GclConsole.refreshFleetTab()
-            else
-                -- Update timer display
-                local remaining = math.ceil(GclConsole.FLEET_DEST_TIMEOUT - age)
-                if GclConsole.fleetTimerLabel then
-                    GclConsole.fleetTimerLabel.caption = string.format(
-                        "Expires in %d seconds", remaining
-                    )
-                end
+    -- Settings callback: Show arrow checkbox changed
+    function GclConsole.onShowArrowChanged(checkBox)
+        GclConsole.config.fleet.showArrow = checkBox.checked
+        GclConsole.saveFleetConfig()
+    end
+
+    -- Settings callback: Play sound checkbox changed
+    function GclConsole.onPlaySoundChanged(checkBox)
+        GclConsole.config.fleet.playSound = checkBox.checked
+        GclConsole.saveFleetConfig()
+    end
+
+    -- Settings callback: Color button pressed
+    function GclConsole.onColorButtonPressed(button)
+        -- Find matching color by button background
+        local btnColor = button.backgroundColor
+        for _, colorEntry in ipairs(GclConsole.HIGHLIGHT_COLORS) do
+            -- Match by checking if it's this color's button (using tooltip)
+            if button.tooltip == colorEntry.name then
+                GclConsole.config.fleet.highlightColor = colorEntry.color
+                GclConsole.saveFleetConfig()
+                displayChatMessage("Highlight color: " .. colorEntry.name, "Fleet", 0)
+                break
             end
         end
     end
-
-    -- Refresh the Fleet tab UI based on current state
-    function GclConsole.refreshFleetTab()
-        if not GclConsole.fleetTab then return end
-
-        if GclConsole.pendingFleetDest then
-            local dest = GclConsole.pendingFleetDest
-
-            -- Update status
-            if GclConsole.fleetStatusLabel then
-                GclConsole.fleetStatusLabel.caption = "Status: Destination pending!"
-            end
-
-            -- Update destination display
-            if GclConsole.fleetDestLabel then
-                GclConsole.fleetDestLabel.caption = string.format(
-                    "DESTINATION: (%d, %d) from %s",
-                    dest.x, dest.y, dest.senderName or "Unknown"
-                )
-            end
-
-            -- Show pending frame
-            if GclConsole.fleetPendingFrame then
-                GclConsole.fleetPendingFrame:show()
-            end
-            if GclConsole.fleetDestLabel then
-                GclConsole.fleetDestLabel:show()
-            end
-            if GclConsole.fleetTimerLabel then
-                GclConsole.fleetTimerLabel:show()
-            end
-        else
-            -- Update status
-            if GclConsole.fleetStatusLabel then
-                GclConsole.fleetStatusLabel.caption = "Status: Ready to broadcast"
-            end
-
-            -- Hide pending frame
-            if GclConsole.fleetPendingFrame then
-                GclConsole.fleetPendingFrame:hide()
-            end
-            if GclConsole.fleetDestLabel then
-                GclConsole.fleetDestLabel:hide()
-            end
-            if GclConsole.fleetTimerLabel then
-                GclConsole.fleetTimerLabel:hide()
-            end
-        end
-    end
-
-    -- Called via RPC when another player broadcasts a destination
-    function GclConsole.receiveFleetDestination(x, y, senderName)
-        -- Log received destination
-        GclConsole.addFleetLogEntry(string.format("RECEIVED: (%d, %d) from %s", x, y, senderName))
-
-        -- Store pending destination with timestamp
-        GclConsole.pendingFleetDest = {
-            x = x,
-            y = y,
-            senderName = senderName,
-            timestamp = appTime()
-        }
-
-        -- Show HUD notification
-        Hud():displayHint(string.format(
-            "Fleet destination: (%d, %d) from %s\nPress F11 to accept (15s)",
-            x, y, senderName
-        ))
-
-        -- Play notification sound
-        playSound("interface/select", SoundType.UI, 0.5)
-
-        -- Update Fleet tab UI if visible
-        GclConsole.refreshFleetTab()
-    end
-
-    callable(GclConsole, "receiveFleetDestination")
-
-    -- Called via RPC when server confirms broadcast
-    function GclConsole.receiveFleetBroadcastResult(count, x, y)
-        -- Log confirmation
-        GclConsole.addFleetLogEntry(string.format("CONFIRMED: (%d, %d) sent to %d player(s)", x, y, count))
-
-        displayChatMessage(
-            string.format("Destination (%d, %d) sent to %d player(s)", x, y, count),
-            "Fleet", 0
-        )
-    end
-
-    callable(GclConsole, "receiveFleetBroadcastResult")
 end -- if onClient()
