@@ -48,7 +48,7 @@ if onClient() then
         -- Mark Target button
         local markTargetBtn = tab:createButton(
             Rect(padding, y, padding + 180, y + 30),
-            "Mark Target (G)",
+            "Mark Target (V)",
             "onFleetMarkTargetPressed"
         )
         markTargetBtn.tooltip = "Highlight your current target for all players in sector"

@@ -228,10 +228,10 @@ if onClient() then
     local keyCooldown = 0
     local KEY_COOLDOWN_TIME = 0.3 -- 300ms cooldown between toggles
 
-    -- Mark Target key (G) debounce state
+    -- Mark Target key (V) debounce state
     local wasMarkKeyDown = false
     local markKeyCooldown = 0
-    local MARK_TARGET_KEY = KeyboardKey._G
+    local MARK_TARGET_KEY = KeyboardKey._V
 
     -- Called every frame on client
     function GclConsole.updateClient(timestep)
@@ -293,7 +293,7 @@ if onClient() then
         end
         wasKeyDown = isKeyDown
 
-        -- Handle G key for Mark Target with debounce
+        -- Handle V key for Mark Target with debounce
         if markKeyCooldown > 0 then
             markKeyCooldown = markKeyCooldown - timestep
         end

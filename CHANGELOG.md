@@ -2,6 +2,11 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
+## [NEXT]
+
+### Changed
+- Changed target highlight keybind from **G** to **V** (G conflicts with torpedoes)
+
 ## [1.7.1] - 2026-01-11
 
 ### Fixed
