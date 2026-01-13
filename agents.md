@@ -49,10 +49,9 @@ make release-major    # Major version (1.0.0 -> 2.0.0)
 ```
 
 **Release Process:**
-1. `make release` bumps the version in `modinfo.lua`
-2. Runs tests (`make test`)
-3. Commits and pushes to main
-4. GitHub Actions automatically:
+1. Rename `## [NEXT]` to `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`
+2. Run `make release` (bumps version in `modinfo.lua`, runs tests, commits, pushes)
+3. GitHub Actions automatically:
    - Creates a GitHub release with changelog
    - Deploys to Steam Workshop
 
@@ -61,7 +60,7 @@ make release-major    # Major version (1.0.0 -> 2.0.0)
 All changes must be documented in `CHANGELOG.md` following these rules:
 
 1. **New changes go in `## [NEXT]`** - Never modify released version entries
-2. **On release**, the `[NEXT]` section is renamed to the new version with date
+2. **Before release**, manually rename `[NEXT]` to the new version with date
 3. **Format**: Use `### Added`, `### Changed`, `### Fixed`, `### Removed` subsections
 4. **Keep entries concise** - One line per change, use sub-bullets for details
 
