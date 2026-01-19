@@ -2,7 +2,17 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
+## [1.8.0] - 2026-01-18
+
+### Added
+- **Cargo Tab Sorting** - Enhanced cargo transfer window with sortable columns
+  - Clickable **Name**, **Qty**, and **Value** column headers
+  - Click to sort ascending (▲), click again for descending (▼)
+  - Both sides (player ship and target) sort independently
+  - Sort state persists while window is open
+
 ## [1.7.2] - 2026-01-12
+
 
 ### Changed
 - Changed target highlight keybind from **G** to **V** (G conflicts with torpedoes)
