@@ -50,7 +50,7 @@ GclConsole.sectorCooldownLabel = nil
 GclConsole.sectorScrollFrame = nil
 GclConsole.sectorRows = {}           -- Array of {frame, nameLabel, statusLabel, cargoLabel, linesLabel, ingredientsLabel}
 GclConsole.sectorHeaderLabels = {}   -- Column headers
-GclConsole.MAX_SECTOR_ROWS = 15      -- Maximum visible rows
+GclConsole.MAX_SECTOR_ROWS = 50      -- Maximum visible rows (increased from 15 for large station counts)
 GclConsole.SECTOR_COOLDOWN_TIME = 30 -- 30 seconds cooldown for sector scan
 GclConsole.sectorCooldown = 0        -- Remaining sector scan cooldown
 
