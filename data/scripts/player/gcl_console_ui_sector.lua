@@ -7,12 +7,13 @@ if onClient() then
     function GclConsole.buildSectorTab(tab)
         local tabSize = tab.size
 
-        -- Column definitions
-        local colStation = { x = 5, w = 130 }       -- Station name
-        local colStatus = { x = 140, w = 55 }       -- Status
-        local colCargo = { x = 200, w = 45 }        -- Cargo %
-        local colLines = { x = 250, w = 40 }        -- Lines active
-        local colIngredients = { x = 295, w = 310 } -- Missing ingredients (wider for long lists)
+        -- Column definitions (adjusted widths for target button)
+        local colStation = { x = 5, w = 110 }       -- Station name (narrower)
+        local colStatus = { x = 120, w = 55 }       -- Status
+        local colCargo = { x = 180, w = 45 }        -- Cargo %
+        local colLines = { x = 230, w = 40 }        -- Lines active
+        local colIngredients = { x = 275, w = 280 } -- Missing ingredients
+        local colTarget = { x = 560, w = 30 }       -- Target button
 
         local rowHeight = 22
         local headerY = 5
@@ -91,12 +92,24 @@ if onClient() then
             row.ingredientsLabel = GclConsole.sectorScrollFrame:createLabel(
                 Rect(colIngredients.x, y + 2, colIngredients.x + colIngredients.w, y + rowHeight), "", 10)
 
+            -- Target button
+            row.targetBtn = GclConsole.sectorScrollFrame:createButton(
+                Rect(colTarget.x, y + 1, colTarget.x + colTarget.w, y + rowHeight - 1),
+                "", "onSectorTargetStation"
+            )
+            row.targetBtn.icon = "data/textures/icons/position-marker.png"
+            row.targetBtn.tooltip = "Target this station"
+
+            -- Storage for entity ID (set when diagnostics are received)
+            row.entityId = nil
+
             -- Initially hidden
             row.nameLabel:hide()
             row.statusLabel:hide()
             row.cargoLabel:hide()
             row.linesLabel:hide()
             row.ingredientsLabel:hide()
+            row.targetBtn:hide()
             if row.frame then row.frame:hide() end
 
             GclConsole.sectorRows[i] = row
@@ -127,7 +140,9 @@ if onClient() then
             if row.cargoLabel then row.cargoLabel:hide() end
             if row.linesLabel then row.linesLabel:hide() end
             if row.ingredientsLabel then row.ingredientsLabel:hide() end
+            if row.targetBtn then row.targetBtn:hide() end
             if row.frame then row.frame:hide() end
+            row.entityId = nil -- Clear saved entity ID
         end
 
         invokeServerFunction("getInSectorDiagnostics")
@@ -205,21 +220,44 @@ if onClient() then
                     row.ingredientsLabel.color = ColorRGB(0.6, 0.6, 0.6)
                 end
 
+                -- Store entity ID for targeting
+                row.entityId = diag.entityId
+
                 -- Show row
                 row.nameLabel:show()
                 row.statusLabel:show()
                 row.cargoLabel:show()
                 row.linesLabel:show()
                 row.ingredientsLabel:show()
+                if row.targetBtn then row.targetBtn:show() end
                 if row.frame then row.frame:show() end
             else
                 -- Hide unused rows
+                row.entityId = nil
                 if row.nameLabel then row.nameLabel:hide() end
                 if row.statusLabel then row.statusLabel:hide() end
                 if row.cargoLabel then row.cargoLabel:hide() end
                 if row.linesLabel then row.linesLabel:hide() end
                 if row.ingredientsLabel then row.ingredientsLabel:hide() end
+                if row.targetBtn then row.targetBtn:hide() end
                 if row.frame then row.frame:hide() end
+            end
+        end
+    end
+
+    -- Target station button handler
+    function GclConsole.onSectorTargetStation(button)
+        -- Find which row this button belongs to
+        for i, row in ipairs(GclConsole.sectorRows) do
+            if row.targetBtn and row.targetBtn.index == button.index then
+                if row.entityId then
+                    -- Target the station
+                    local entity = Sector():getEntity(Uuid(row.entityId))
+                    if entity then
+                        Player().selectedObject = entity
+                    end
+                end
+                return
             end
         end
     end

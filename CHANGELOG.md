@@ -2,6 +2,14 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
+## [1.9.0] - 2026-01-22
+
+### Added
+- **Sector Tab Targeting** - Click-to-target stations from diagnostics view
+  - New 📍 target button on each station row
+  - Click to instantly select/target that station
+  - No more hunting through the N menu to find specific stations
+
 ## [1.8.0] - 2026-01-18
 
 ### Added

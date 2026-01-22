@@ -261,6 +261,7 @@ if onServer() then
                         local diag = {
                             stationId = stationName,
                             name = stationName,
+                            entityId = station.id.string, -- For click-to-target
                             ingredients = {},
                             cargoFillPercent = 0,
                             activeProductions = activeProductions,
