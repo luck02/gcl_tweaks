@@ -10,7 +10,8 @@ if UpgradeGenerator then
         end
 
         -- GCL Tweaks: Apply persistent multipliers from Server storage
-        if self.scripts then
+        -- Only run on server side - Server() is nil on client
+        if self.scripts and onServer() then
             for scriptPath, data in pairs(self.scripts) do
                 local basename = scriptPath:match("([^/]+)$")
                 if basename then
