@@ -2,13 +2,12 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
-## [1.9.0] - 2026-01-22
+## [1.8.1] - 2026-01-23
 
-### Added
-- **Sector Tab Targeting** - Click-to-target stations from diagnostics view
-  - New 📍 target button on each station row
-  - Click to instantly select/target that station
-  - No more hunting through the N menu to find specific stations
+### Fixed
+- **Multiplayer Click-to-Target** - Fixed sector tab targeting not working for non-host players
+  - Changed entity lookup from UUID string to numerical index for reliable client-side resolution
+  - Targeting now works correctly when another player is hosting
 
 ## [1.8.0] - 2026-01-18
 

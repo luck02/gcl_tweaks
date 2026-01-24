@@ -251,9 +251,9 @@ if onClient() then
         for i, row in ipairs(GclConsole.sectorRows) do
             if row.targetBtn and row.targetBtn.index == button.index then
                 if row.entityId then
-                    -- Target the station
-                    local entity = Sector():getEntity(Uuid(row.entityId))
-                    if entity then
+                    -- Target the station using numerical index (works for non-host clients)
+                    local entity = Entity(row.entityId)
+                    if valid(entity) then
                         Player().selectedObject = entity
                     end
                 end
