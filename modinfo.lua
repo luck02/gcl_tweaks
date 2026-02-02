@@ -1,3 +1,4 @@
+
 meta =
 {
     -- ID of your mod; Make sure this is unique!
@@ -16,17 +17,16 @@ meta =
     type = "mod",
 
     -- Description of your mod that will be displayed to players
-    description =
-    "Provides utility commands and a Trade Statistics dashboard.\n\nPress F9 to toggle console window with Console, Trade, Sector, and Fleet tabs.\n\nFleet Tab: Press V to mark your target for all players in sector. Configurable highlight settings.\n\nTrade Tab: View station profits across all sectors in a spreadsheet layout. Automatic scanning every 5 minutes.\n\nCommands:\n/gcl_tweak showdroptables - Display system upgrade drop rates\n/gcl_tweak setdroprate <component> <multiplier> - Adjust drop rates\n/gcl_tweak isobjectwrecked - Check if entity has boarding malus\n/gcl_tweak setobjectwrecked 0|1 - Clear/set boarding malus\n/gcl_tweak scantrade [0|1] - Toggle automatic trade scanning",
+    description = "Provides utility commands and a Trade Statistics dashboard.\n\nPress F9 to toggle console window with Console, Trade, Sector, and Fleet tabs.\n\nFleet Tab: Press V to mark your target for all players in sector. Configurable highlight settings.\n\nTrade Tab: View station profits across all sectors in a spreadsheet layout. Automatic scanning every 5 minutes.\n\nCommands:\n/gcl_tweak showdroptables - Display system upgrade drop rates\n/gcl_tweak setdroprate <component> <multiplier> - Adjust drop rates\n/gcl_tweak isobjectwrecked - Check if entity has boarding malus\n/gcl_tweak setobjectwrecked 0|1 - Clear/set boarding malus\n/gcl_tweak scantrade [0|1] - Toggle automatic trade scanning",
 
     -- Insert all authors into this list
-    authors = { "luck2020" },
+    authors = {"luck2020"},
 
     -- Version of your mod, should be in format 1.0.0 (major.minor.patch) or 1.0 (major.minor)
     -- This will be used to check for unmet dependencies or incompatibilities, and to check compatibility between clients and dedicated servers with mods.
     -- If a client with an unmatching major or minor mod version wants to log into a server, login is prohibited.
     -- Unmatching patch version still allows logging into a server. This works in both ways (server or client higher or lower version).
-    version = "1.8.1",
+    version = "1.9.0",
 
     -- If your mod requires dependencies, enter them here. The game will check that all dependencies given here are met.
     -- Possible attributes:
@@ -44,8 +44,8 @@ meta =
     --      {id = "OptionalMod", min = "0.2", optional = true}, -- we support OptionalMod optionally, starting at version 0.2
     -- },
     dependencies = {
-        { id = "Avorion",    max = "2.5.11" },
-        { id = "1722652757", optional = true }, -- AzimuthLib for config persistence
+        {id = "1722652757", exact = "*.*", optional = true},
+        {id = "Avorion", max = "2.5.11"}
     },
 
     -- Set to true if the mod only has to run on the server. Clients will get notified that the mod is running on the server, but they won't download it to themselves
