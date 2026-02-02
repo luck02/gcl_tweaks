@@ -2,6 +2,14 @@
 
 All notable changes to GCL Tweaks will be documented in this file.
 
+## [1.9.0] - 2026-02-01
+
+### Added
+- **Coal Mine Diamond Production** - Coal mines now produce 1 Diamond per production cycle
+  - Extends vanilla productionsindex to add Diamond as secondary output
+  - Automatically upgrades existing coal mines when loaded
+  - Properly registers Diamond for trading so mines can sell it
+
 ## [1.8.1] - 2026-01-23
 
 ### Fixed
