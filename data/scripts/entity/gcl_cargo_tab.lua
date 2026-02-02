@@ -51,6 +51,20 @@ local COLOR_NORMAL = ColorRGB(0.8, 0.8, 0.8)
 local COLOR_HEADER = ColorRGB(0.6, 0.7, 0.8)
 
 function GclCargoTab.build(tabbedWindow)
+    -- Clear any existing state from previous builds (prevents stale row mappings)
+    playerCargoRows = {}
+    selfCargoRows = {}
+    cargosByButton = {}
+    cargosByTextBox = {}
+    textboxIndexByButton = {}
+    playerCargoName = {}
+    selfCargoName = {}
+    playerCargoTextBoxByIndex = {}
+    selfCargoTextBoxByIndex = {}
+    missionIngredients = {}
+    playerSortedIndices = {}
+    selfSortedIndices = {}
+
     local cargoTab = tabbedWindow:createTab("Cargo" % _t, "data/textures/icons/trade.png", "Exchange Cargo" % _t)
 
     local vSplit = UIVerticalSplitter(Rect(cargoTab.size), 10, 0, 0.5)
@@ -240,14 +254,14 @@ function GclCargoTab.createHeaderRow(frame, lister, isPlayerSide)
     row.nameHeader = frame:createButton(nameRect, "Name " .. GclCargoTab.getSortIndicator(isPlayerSide, SortColumn.NAME),
         "onGcl" .. prefix .. "SortByName")
     row.nameHeader.textSize = 11
-    row.nameHeader.color = COLOR_HEADER
+    row.nameHeader.captionColor = COLOR_HEADER
 
     local qtyRect = Rect(vec2(nameRect.upper.x, afterIndicatorRect.lower.y),
         vec2(nameRect.upper.x + qtyWidth, afterIndicatorRect.upper.y))
     row.qtyHeader = frame:createButton(qtyRect, "Qty" .. GclCargoTab.getSortIndicator(isPlayerSide, SortColumn.QTY),
         "onGcl" .. prefix .. "SortByQty")
     row.qtyHeader.textSize = 11
-    row.qtyHeader.color = COLOR_HEADER
+    row.qtyHeader.captionColor = COLOR_HEADER
 
     local valueRect = Rect(vec2(qtyRect.upper.x, afterIndicatorRect.lower.y),
         vec2(qtyRect.upper.x + valueWidth, afterIndicatorRect.upper.y))
@@ -255,7 +269,7 @@ function GclCargoTab.createHeaderRow(frame, lister, isPlayerSide)
         "Value" .. GclCargoTab.getSortIndicator(isPlayerSide, SortColumn.VALUE),
         "onGcl" .. prefix .. "SortByValue")
     row.valueHeader.textSize = 11
-    row.valueHeader.color = COLOR_HEADER
+    row.valueHeader.captionColor = COLOR_HEADER
 
     return row
 end
@@ -443,7 +457,7 @@ function GclCargoTab.refreshCargoUI(playerShip, ship)
         local value = cargo.totalValue
         local displayName = cargo.displayName
 
-        row.nameLabel.caption = displayName
+        row.nameLabel.caption = good.name
         row.nameLabel.color = color
 
         row.qtyLabel.caption = "x" .. createMonetaryString(amount)
@@ -549,7 +563,7 @@ function GclCargoTab.refreshCargoUI(playerShip, ship)
         local value = cargo.totalValue
         local displayName = cargo.displayName
 
-        row.nameLabel.caption = displayName
+        row.nameLabel.caption = good.name
         row.nameLabel.color = color
 
         row.qtyLabel.caption = "x" .. createMonetaryString(amount)

@@ -134,6 +134,72 @@ if onClient() then
         end
         y = y + 35
 
+        -- Separator before Escort Loot section
+        tab:createLine(vec2(padding, y), vec2(tabSize.x - padding, y))
+        y = y + 10
+
+        -- Escort Loot Collection section title
+        tab:createLabel(
+            Rect(padding, y, tabSize.x - padding, y + 20),
+            "Escort Loot Collection:",
+            14
+        )
+        y = y + 22
+
+        -- Description
+        local descLabel = tab:createLabel(
+            Rect(padding, y, tabSize.x - padding, y + 15),
+            "Auto-deploy fighters to collect loot while escorting",
+            11
+        )
+        descLabel.color = ColorRGB(0.7, 0.7, 0.7)
+        y = y + 18
+
+        -- Ship list (small)
+        local listHeight = 80
+        GclConsole.escortLootListBox = tab:createListBox(
+            Rect(padding, y, tabSize.x - padding, y + listHeight)
+        )
+        GclConsole.escortLootListBox.fontSize = 11
+        y = y + listHeight + 5
+
+        -- Buttons row
+        local btnWidth = 70
+        local btnSpacing = 5
+        local btnX = padding
+
+        local toggleBtn = tab:createButton(
+            Rect(btnX, y, btnX + btnWidth, y + 25),
+            "Toggle",
+            "onEscortLootTogglePressed"
+        )
+        toggleBtn.tooltip = "Toggle escort loot on selected ship"
+        btnX = btnX + btnWidth + btnSpacing
+
+        local enableAllBtn = tab:createButton(
+            Rect(btnX, y, btnX + btnWidth, y + 25),
+            "All ON",
+            "onEscortLootEnableAllPressed"
+        )
+        enableAllBtn.tooltip = "Enable on all ships with fighters"
+        btnX = btnX + btnWidth + btnSpacing
+
+        local disableAllBtn = tab:createButton(
+            Rect(btnX, y, btnX + btnWidth, y + 25),
+            "All OFF",
+            "onEscortLootDisableAllPressed"
+        )
+        disableAllBtn.tooltip = "Disable on all ships"
+        btnX = btnX + btnWidth + btnSpacing
+
+        local refreshBtn = tab:createButton(
+            Rect(btnX, y, btnX + btnWidth, y + 25),
+            "Refresh",
+            "onEscortLootRefreshPressed"
+        )
+        refreshBtn.tooltip = "Refresh ship list"
+        y = y + 35
+
         -- Separator before activity log
         tab:createLine(vec2(padding, y), vec2(tabSize.x - padding, y))
         y = y + 10
@@ -157,6 +223,9 @@ if onClient() then
         for _, entry in ipairs(GclConsole.fleetActivityLog) do
             GclConsole.fleetActivityListBox:addEntry(entry)
         end
+
+        -- Request initial escort loot status
+        invokeServerFunction("getEscortLootStatus")
     end
 
     -- Target marking toggle handler
@@ -266,4 +335,100 @@ if onClient() then
             end
         end
     end
+    -- =========================================================================
+    -- ESCORT LOOT COLLECTION - Client-side receivers and UI
+    -- =========================================================================
+
+    -- Receive result of enabling/disabling escort loot on single ship
+    function GclConsole.receiveEscortLootResult(shipName, success, message)
+        if success then
+            displayChatMessage(string.format("Escort Loot: %s - %s", shipName, message), "Fleet", 0)
+        else
+            displayChatMessage(string.format("Escort Loot ERROR: %s - %s", shipName, message), "Fleet", 1)
+        end
+        GclConsole.addFleetLogEntry(string.format("Escort Loot: %s - %s", shipName, message))
+    end
+
+    -- Receive result of enable/disable all
+    function GclConsole.receiveEscortLootAllResult(count, error)
+        if error then
+            displayChatMessage(string.format("Escort Loot ERROR: %s", error), "Fleet", 1)
+        else
+            displayChatMessage(string.format("Escort Loot: Updated %d ships", count), "Fleet", 0)
+        end
+        GclConsole.addFleetLogEntry(string.format("Escort Loot: Updated %d ships", count))
+
+        -- Refresh status display
+        invokeServerFunction("getEscortLootStatus")
+    end
+
+    -- Receive status of all ships in sector
+    function GclConsole.receiveEscortLootStatus(ships)
+        GclConsole.escortLootShips = ships
+        GclConsole.updateEscortLootList()
+    end
+
+    -- Update the escort loot ship list UI
+    function GclConsole.updateEscortLootList()
+        if not valid(GclConsole.escortLootListBox) then return end
+
+        GclConsole.escortLootListBox:clear()
+
+        if not GclConsole.escortLootShips or #GclConsole.escortLootShips == 0 then
+            GclConsole.escortLootListBox:addEntry("No ships with fighters in sector")
+            return
+        end
+
+        for _, ship in ipairs(GclConsole.escortLootShips) do
+            local status = ship.escortLootEnabled and "[ON]" or "[OFF]"
+            local mode = ""
+            if ship.isEscorting then
+                mode = " (escorting)"
+            elseif ship.isFollowing then
+                mode = " (following)"
+            end
+            local entry = string.format("%s %s (%d fighters)%s",
+                status, ship.name, ship.fighterCount, mode)
+            GclConsole.escortLootListBox:addEntry(entry)
+        end
+    end
+
+    -- Toggle escort loot on selected ship
+    function GclConsole.onEscortLootTogglePressed()
+        if not valid(GclConsole.escortLootListBox) then return end
+        if not GclConsole.escortLootShips then return end
+
+        local idx = GclConsole.escortLootListBox.selected
+        if idx < 0 or idx >= #GclConsole.escortLootShips then
+            displayChatMessage("Select a ship from the list", "Fleet", 1)
+            return
+        end
+
+        local ship = GclConsole.escortLootShips[idx + 1]  -- Lua 1-indexed
+        if ship.escortLootEnabled then
+            invokeServerFunction("disableEscortLoot", ship.name)
+        else
+            invokeServerFunction("enableEscortLoot", ship.name)
+        end
+    end
+
+    -- Enable escort loot on all ships
+    function GclConsole.onEscortLootEnableAllPressed()
+        invokeServerFunction("enableEscortLootAll")
+    end
+
+    -- Disable escort loot on all ships
+    function GclConsole.onEscortLootDisableAllPressed()
+        invokeServerFunction("disableEscortLootAll")
+    end
+
+    -- Refresh escort loot status
+    function GclConsole.onEscortLootRefreshPressed()
+        invokeServerFunction("getEscortLootStatus")
+    end
+
+    -- Storage for escort loot ship data
+    GclConsole.escortLootShips = {}
+    GclConsole.escortLootListBox = nil
+
 end -- if onClient()

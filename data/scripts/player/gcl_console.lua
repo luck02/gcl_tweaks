@@ -85,41 +85,61 @@ GclConsole.PULSE_SPEEDS = {
     fast = 2.0
 }
 
--- Load fleet config from AzimuthLib
-function GclConsole.loadFleetConfig()
-    local ok, duration = Azimuth.getConfig("GclTweaks", "fleetHighlightDuration")
-    if ok and duration then GclConsole.config.fleet.highlightDuration = duration end
+-- Fleet config options for AzimuthLib validation
+local fleetConfigOptions = {
+    highlightDuration = { 10, comment = "Duration in seconds (5-30)" },
+    highlightColorR = { 1.0, comment = "Red component (0-1)" },
+    highlightColorG = { 0.5, comment = "Green component (0-1)" },
+    highlightColorB = { 0.0, comment = "Blue component (0-1)" },
+    pulseSpeed = { "normal", comment = "Pulse speed: slow, normal, fast" },
+    showArrow = { true, comment = "Show direction arrow" },
+    playSound = { true, comment = "Play notification sound" }
+}
 
-    local ok2, colorR = Azimuth.getConfig("GclTweaks", "fleetColorR")
-    local ok3, colorG = Azimuth.getConfig("GclTweaks", "fleetColorG")
-    local ok4, colorB = Azimuth.getConfig("GclTweaks", "fleetColorB")
-    if ok2 and ok3 and ok4 then
-        GclConsole.config.fleet.highlightColor = { r = colorR, g = colorG, b = colorB }
+-- Load fleet config using AzimuthLib
+function GclConsole.loadFleetConfig()
+    if not Azimuth or not Azimuth.loadConfig then
+        print("[GCL Fleet] AzimuthLib not available, using defaults")
+        return
     end
 
-    local ok5, pulseSpeed = Azimuth.getConfig("GclTweaks", "fleetPulseSpeed")
-    if ok5 and pulseSpeed then GclConsole.config.fleet.pulseSpeed = pulseSpeed end
+    local cfg = Azimuth.loadConfig("GclTweaks_Fleet", fleetConfigOptions)
 
-    local ok6, showArrow = Azimuth.getConfig("GclTweaks", "fleetShowArrow")
-    if ok6 ~= nil then GclConsole.config.fleet.showArrow = showArrow end
-
-    local ok7, playSound = Azimuth.getConfig("GclTweaks", "fleetPlaySound")
-    if ok7 ~= nil then GclConsole.config.fleet.playSound = playSound end
+    if cfg then
+        GclConsole.config.fleet.highlightDuration = cfg.highlightDuration or 10
+        GclConsole.config.fleet.highlightColor = {
+            r = cfg.highlightColorR or 1.0,
+            g = cfg.highlightColorG or 0.5,
+            b = cfg.highlightColorB or 0.0
+        }
+        GclConsole.config.fleet.pulseSpeed = cfg.pulseSpeed or "normal"
+        GclConsole.config.fleet.showArrow = cfg.showArrow
+        GclConsole.config.fleet.playSound = cfg.playSound
+    end
 
     print("[GCL Fleet] Config loaded: duration=" .. GclConsole.config.fleet.highlightDuration ..
         ", pulse=" .. GclConsole.config.fleet.pulseSpeed)
 end
 
--- Save fleet config to AzimuthLib
+-- Save fleet config using AzimuthLib
 function GclConsole.saveFleetConfig()
+    if not Azimuth or not Azimuth.saveConfig then
+        print("[GCL Fleet] AzimuthLib not available, config not saved")
+        return
+    end
+
     local cfg = GclConsole.config.fleet
-    Azimuth.setConfig("GclTweaks", "fleetHighlightDuration", cfg.highlightDuration)
-    Azimuth.setConfig("GclTweaks", "fleetColorR", cfg.highlightColor.r)
-    Azimuth.setConfig("GclTweaks", "fleetColorG", cfg.highlightColor.g)
-    Azimuth.setConfig("GclTweaks", "fleetColorB", cfg.highlightColor.b)
-    Azimuth.setConfig("GclTweaks", "fleetPulseSpeed", cfg.pulseSpeed)
-    Azimuth.setConfig("GclTweaks", "fleetShowArrow", cfg.showArrow)
-    Azimuth.setConfig("GclTweaks", "fleetPlaySound", cfg.playSound)
+    local saveData = {
+        highlightDuration = cfg.highlightDuration,
+        highlightColorR = cfg.highlightColor.r,
+        highlightColorG = cfg.highlightColor.g,
+        highlightColorB = cfg.highlightColor.b,
+        pulseSpeed = cfg.pulseSpeed,
+        showArrow = cfg.showArrow,
+        playSound = cfg.playSound
+    }
+
+    Azimuth.saveConfig("GclTweaks_Fleet", saveData, fleetConfigOptions)
     print("[GCL Fleet] Config saved")
 end
 
@@ -373,6 +393,48 @@ end
 
 function onColorButtonPressed(button)
     GclConsole.onColorButtonPressed(button)
+end
+
+-- Escort loot callbacks
+function onEscortLootTogglePressed()
+    GclConsole.onEscortLootTogglePressed()
+end
+
+function onEscortLootEnableAllPressed()
+    GclConsole.onEscortLootEnableAllPressed()
+end
+
+function onEscortLootDisableAllPressed()
+    GclConsole.onEscortLootDisableAllPressed()
+end
+
+function onEscortLootRefreshPressed()
+    GclConsole.onEscortLootRefreshPressed()
+end
+
+-- Sector tab sorting callbacks
+function onSectorSortByStation()
+    GclConsole.onSectorSortByStation()
+end
+
+function onSectorSortByStatus()
+    GclConsole.onSectorSortByStatus()
+end
+
+function onSectorSortByCargo()
+    GclConsole.onSectorSortByCargo()
+end
+
+function onSectorSortByLines()
+    GclConsole.onSectorSortByLines()
+end
+
+function onSectorSortByIngredients()
+    GclConsole.onSectorSortByIngredients()
+end
+
+function onSectorTargetStation(button)
+    GclConsole.onSectorTargetStation(button)
 end
 
 -- Global engine callbacks (Avorion calls these, not namespace-qualified versions)

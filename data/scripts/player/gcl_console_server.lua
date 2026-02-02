@@ -852,6 +852,229 @@ if onServer() then
     end
 
     callable(GclConsole, "devSpawnTestTarget")
+
+    -- =========================================================================
+    -- ESCORT LOOT COLLECTION - Auto-deploy fighters to collect loot while escorting
+    -- =========================================================================
+
+    -- Enable escort loot collection on a ship by name
+    -- The ship must be in the current sector
+    function GclConsole.enableEscortLoot(shipName)
+        local player = Player(callingPlayer) or Player()
+        if not player then return end
+
+        local sector = Sector()
+        if not sector then
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, false, "No sector")
+            return
+        end
+
+        -- Find player's ship in sector
+        local ships = {sector:getEntitiesByType(EntityType.Ship)}
+        local targetShip = nil
+
+        for _, ship in pairs(ships) do
+            if ship.name == shipName then
+                -- Check ownership
+                local isOwned = ship.factionIndex == player.index
+                if player.allianceIndex and ship.factionIndex == player.allianceIndex then
+                    isOwned = true
+                end
+                if isOwned then
+                    targetShip = ship
+                    break
+                end
+            end
+        end
+
+        if not targetShip then
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, false, "Ship not found in sector")
+            return
+        end
+
+        -- Check if ship has hangar with fighters
+        local hangar = Hangar(targetShip.id)
+        if not hangar or hangar.numFighters == 0 then
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, false, "Ship has no fighters")
+            return
+        end
+
+        -- Add the script
+        local added = targetShip:addScriptOnce("data/scripts/entity/gcl_escort_loot.lua")
+        if added then
+            print(string.format("[GCL Escort Loot] Enabled on %s", shipName))
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, true, "Enabled")
+        else
+            -- Script already present
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, true, "Already enabled")
+        end
+    end
+
+    callable(GclConsole, "enableEscortLoot")
+
+    -- Disable escort loot collection on a ship
+    function GclConsole.disableEscortLoot(shipName)
+        local player = Player(callingPlayer) or Player()
+        if not player then return end
+
+        local sector = Sector()
+        if not sector then
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, false, "No sector")
+            return
+        end
+
+        -- Find player's ship in sector
+        local ships = {sector:getEntitiesByType(EntityType.Ship)}
+        local targetShip = nil
+
+        for _, ship in pairs(ships) do
+            if ship.name == shipName then
+                local isOwned = ship.factionIndex == player.index
+                if player.allianceIndex and ship.factionIndex == player.allianceIndex then
+                    isOwned = true
+                end
+                if isOwned then
+                    targetShip = ship
+                    break
+                end
+            end
+        end
+
+        if not targetShip then
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, false, "Ship not found in sector")
+            return
+        end
+
+        -- Remove the script
+        local hasScript = targetShip:hasScript("data/scripts/entity/gcl_escort_loot.lua")
+        if hasScript then
+            targetShip:removeScript("data/scripts/entity/gcl_escort_loot.lua")
+            print(string.format("[GCL Escort Loot] Disabled on %s", shipName))
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, true, "Disabled")
+        else
+            invokeClientFunction(player, "receiveEscortLootResult", shipName, true, "Already disabled")
+        end
+    end
+
+    callable(GclConsole, "disableEscortLoot")
+
+    -- Get list of ships in sector with their escort loot status
+    function GclConsole.getEscortLootStatus()
+        local player = Player(callingPlayer) or Player()
+        if not player then return end
+
+        local sector = Sector()
+        if not sector then
+            invokeClientFunction(player, "receiveEscortLootStatus", {})
+            return
+        end
+
+        local ships = {sector:getEntitiesByType(EntityType.Ship)}
+        local results = {}
+
+        for _, ship in pairs(ships) do
+            local isOwned = ship.factionIndex == player.index
+            if player.allianceIndex and ship.factionIndex == player.allianceIndex then
+                isOwned = true
+            end
+
+            if isOwned then
+                local hangar = Hangar(ship.id)
+                local hasFighters = hangar and hangar.numFighters > 0
+                local hasScript = ship:hasScript("data/scripts/entity/gcl_escort_loot.lua")
+
+                -- Check if escorting or following
+                -- AIState: Escort=2, Follow=10
+                local ai = ShipAI(ship.id)
+                local isEscorting = ai and (ai.state == 2 or ai:getEscortTarget() ~= nil)
+                local isFollowing = ai and (ai.state == 10 or ai:getFollowTarget() ~= nil)
+
+                table.insert(results, {
+                    name = ship.name,
+                    hasFighters = hasFighters,
+                    fighterCount = hangar and hangar.numFighters or 0,
+                    escortLootEnabled = hasScript,
+                    isEscorting = isEscorting,
+                    isFollowing = isFollowing
+                })
+            end
+        end
+
+        invokeClientFunction(player, "receiveEscortLootStatus", results)
+    end
+
+    callable(GclConsole, "getEscortLootStatus")
+
+    -- Enable escort loot on ALL owned ships with fighters in sector
+    function GclConsole.enableEscortLootAll()
+        local player = Player(callingPlayer) or Player()
+        if not player then return end
+
+        local sector = Sector()
+        if not sector then
+            invokeClientFunction(player, "receiveEscortLootAllResult", 0, "No sector")
+            return
+        end
+
+        local ships = {sector:getEntitiesByType(EntityType.Ship)}
+        local enabledCount = 0
+
+        for _, ship in pairs(ships) do
+            local isOwned = ship.factionIndex == player.index
+            if player.allianceIndex and ship.factionIndex == player.allianceIndex then
+                isOwned = true
+            end
+
+            if isOwned then
+                local hangar = Hangar(ship.id)
+                if hangar and hangar.numFighters > 0 then
+                    local added = ship:addScriptOnce("data/scripts/entity/gcl_escort_loot.lua")
+                    if added then
+                        enabledCount = enabledCount + 1
+                        print(string.format("[GCL Escort Loot] Enabled on %s", ship.name))
+                    end
+                end
+            end
+        end
+
+        invokeClientFunction(player, "receiveEscortLootAllResult", enabledCount, nil)
+    end
+
+    callable(GclConsole, "enableEscortLootAll")
+
+    -- Disable escort loot on ALL ships in sector
+    function GclConsole.disableEscortLootAll()
+        local player = Player(callingPlayer) or Player()
+        if not player then return end
+
+        local sector = Sector()
+        if not sector then
+            invokeClientFunction(player, "receiveEscortLootAllResult", 0, "No sector")
+            return
+        end
+
+        local ships = {sector:getEntitiesByType(EntityType.Ship)}
+        local disabledCount = 0
+
+        for _, ship in pairs(ships) do
+            local isOwned = ship.factionIndex == player.index
+            if player.allianceIndex and ship.factionIndex == player.allianceIndex then
+                isOwned = true
+            end
+
+            if isOwned then
+                if ship:hasScript("data/scripts/entity/gcl_escort_loot.lua") then
+                    ship:removeScript("data/scripts/entity/gcl_escort_loot.lua")
+                    disabledCount = disabledCount + 1
+                    print(string.format("[GCL Escort Loot] Disabled on %s", ship.name))
+                end
+            end
+        end
+
+        invokeClientFunction(player, "receiveEscortLootAllResult", disabledCount, nil)
+    end
+
+    callable(GclConsole, "disableEscortLootAll")
 end
 
 -- Trading callbacks (must be global for registerCallback)
